@@ -87,7 +87,7 @@ func run() {
 	}
 	go func() {
 		log.InfofCtx(ctx, "Starting configfs FUSE serving")
-		if err := remoteFS.Serve(); err != nil {
+		if err := remoteFS.Serve(ctx); err != nil {
 			log.ErrorfCtx(ctx, err, "error while serving file system")
 		}
 	}()

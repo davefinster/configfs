@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
@@ -21,19 +22,21 @@ type RemoteConfigFS struct {
 	mountPoint string
 	opts       *RemoteConfigFSOptions
 
-	mu        sync.Mutex
-	fuseMount *fuse.Conn
-	snapshot  *FilesystemSnapshot
-	root      *Dir
+	mu                       sync.Mutex
+	fuseMount                *fuse.Conn
+	snapshot                 *FilesystemSnapshot
+	root                     *Dir
+	backgroundRefreshStarted bool
 }
 
 type RemoteConfigFSOptions struct {
-	Owner     *uint32
-	Group     *uint32
-	FileMode  *os.FileMode
-	Writable  bool
-	FSName    *string
-	FSSubtype *string
+	Owner           *uint32
+	Group           *uint32
+	FileMode        *os.FileMode
+	Writable        bool
+	FSName          *string
+	FSSubtype       *string
+	RefreshInterval time.Duration
 }
 
 func NewRemoteConfigFS(client types.ConfigFSServerClient, mountPoint string, opts *RemoteConfigFSOptions) *RemoteConfigFS {
@@ -41,10 +44,11 @@ func NewRemoteConfigFS(client types.ConfigFSServerClient, mountPoint string, opt
 	root := uint32(0)
 	fileMode := os.FileMode(0o444)
 	o := &RemoteConfigFSOptions{
-		Owner:    &root,
-		Group:    &root,
-		Writable: true,
-		FileMode: &fileMode,
+		Owner:           &root,
+		Group:           &root,
+		Writable:        true,
+		FileMode:        &fileMode,
+		RefreshInterval: 10 * time.Second,
 	}
 	if opts != nil {
 		o = opts
@@ -160,7 +164,26 @@ func (s *RemoteConfigFS) LoadSnapshot(ctx context.Context) error {
 	return nil
 }
 
-func (s *RemoteConfigFS) Serve() error {
+func (s *RemoteConfigFS) backgroundLoop(ctx context.Context) {
+	s.mu.Lock()
+	if s.backgroundRefreshStarted {
+		s.mu.Unlock()
+		return
+	}
+	s.backgroundRefreshStarted = true
+	s.mu.Unlock()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(s.opts.RefreshInterval):
+			s.LoadSnapshot(ctx)
+		}
+	}
+}
+
+func (s *RemoteConfigFS) Serve(ctx context.Context) error {
+	go s.backgroundLoop(ctx)
 	return fs.Serve(s.fuseMount, s)
 }
 
@@ -221,7 +244,9 @@ func directoryMap(top *types.Directory, m map[string]*types.Directory, c map[str
 func (s *FilesystemSnapshot) Refresh(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	res, err := s.client.List(ctx, &types.ListRequest{})
+	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	res, err := s.client.List(timeoutCtx, &types.ListRequest{})
 	if err != nil {
 		return err
 	}
