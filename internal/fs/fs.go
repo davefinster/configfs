@@ -177,7 +177,9 @@ func (s *RemoteConfigFS) backgroundLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(s.opts.RefreshInterval):
-			s.LoadSnapshot(ctx)
+			if s.snapshot != nil {
+				s.snapshot.Refresh(ctx)
+			}
 		}
 	}
 }
