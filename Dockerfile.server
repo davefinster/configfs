@@ -1,7 +1,9 @@
 FROM golang:alpine
 WORKDIR /root/project
+# C toolchain required to build with CGO_ENABLED=1 (the sqlite driver uses cgo).
+RUN apk add --no-cache gcc musl-dev
 COPY . .
-RUN GOOS=linux go build -a -v ./cmd/server/main.go
+RUN CGO_ENABLED=1 GOOS=linux go build -a -v ./cmd/server/main.go
 
 FROM alpine:latest
 RUN apk add --no-cache curl ca-certificates && mkdir -p /app
