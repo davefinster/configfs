@@ -29,16 +29,18 @@ import (
 )
 
 var (
-	grpcPort           = flag.Int("grpc_port", 443, "Port to listen on")
-	sqlitePath         = flag.String("sqlite_path", "configfs.db", "Path to SQLite file")
-	kernelNetworking   = flag.Bool("kernel_networking", false, "Whether the server should just listen on kernel networking.")
-	tailscaleDirectory = flag.String("tailscale_directory", "", "Directory for storing Tailscale state")
-	tailscaleAuthKey   = flag.String("tailscale_authkey", "", "Authentication key to use with Tailscale")
-	tailscaleHostname  = flag.String("tailscale_hostname", "", "Hostname to use when registering with Tailscale")
-	tailscaleTags      = flag.String("tailscale_tags", "", "Comma separated list of Tailscale tags.")
-	tailscaleService   = flag.String("tailscale_service", "", "Name of the Tailscale service to listen on.")
-	tailscaleEphemeral = flag.Bool("tailscale_ephemeral", true, "Whether the Tailscale node should be registered as ephemeral.")
-	createAllowedTags  = flag.String("create_allowed_tags", "", "Comma separated identities (tags like tag:foo and users like user:alice@example.com) permitted to create new configs. Empty means no restriction. Does not affect updates or deletes, which use per-config ACLs.")
+	grpcPort              = flag.Int("grpc_port", 443, "Port to listen on")
+	sqlitePath            = flag.String("sqlite_path", "configfs.db", "Path to SQLite file")
+	kernelNetworking      = flag.Bool("kernel_networking", false, "Whether the server should just listen on kernel networking.")
+	tailscaleDirectory    = flag.String("tailscale_directory", "", "Directory for storing Tailscale state")
+	tailscaleAuthKey      = flag.String("tailscale_authkey", "", "Authentication key to use with Tailscale")
+	tailscaleClientID     = flag.String("tailscale_client_id", "", "Client ID to use when authenticating with Tailscale")
+	tailscaleClientSecret = flag.String("tailscale_client_secret", "", "Client Secret to use when authenticating with Tailscale")
+	tailscaleHostname     = flag.String("tailscale_hostname", "", "Hostname to use when registering with Tailscale")
+	tailscaleTags         = flag.String("tailscale_tags", "", "Comma separated list of Tailscale tags.")
+	tailscaleService      = flag.String("tailscale_service", "", "Name of the Tailscale service to listen on.")
+	tailscaleEphemeral    = flag.Bool("tailscale_ephemeral", true, "Whether the Tailscale node should be registered as ephemeral.")
+	createAllowedTags     = flag.String("create_allowed_tags", "", "Comma separated identities (tags like tag:foo and users like user:alice@example.com) permitted to create new configs. Empty means no restriction. Does not affect updates or deletes, which use per-config ACLs.")
 )
 
 func listener(ctx context.Context, s *tsnet.Server) (net.Listener, error) {
@@ -76,10 +78,12 @@ func run() {
 	)
 	if !*kernelNetworking {
 		s = &tsnet.Server{
-			Hostname:  *tailscaleHostname,
-			AuthKey:   *tailscaleAuthKey,
-			Dir:       *tailscaleDirectory,
-			Ephemeral: *tailscaleEphemeral,
+			Hostname:     *tailscaleHostname,
+			AuthKey:      *tailscaleAuthKey,
+			Dir:          *tailscaleDirectory,
+			Ephemeral:    *tailscaleEphemeral,
+			ClientID:     *tailscaleClientID,
+			ClientSecret: *tailscaleClientSecret,
 		}
 		if *tailscaleTags != "" {
 			tags := strings.Split(*tailscaleTags, ",")

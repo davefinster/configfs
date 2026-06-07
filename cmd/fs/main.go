@@ -21,13 +21,15 @@ import (
 )
 
 var (
-	serverAddress      = flag.String("grpc_address", "configfs.tailbd60.ts.net:443", "Address to connect to server on")
-	kernelNetworking   = flag.Bool("kernel_networking", false, "Whether the server should just listen on kernel networking.")
-	mountPoint         = flag.String("mount_point", "/mnt/fusetest", "")
-	tailscaleDirectory = flag.String("tailscale_directory", "", "Directory for storing Tailscale state")
-	tailscaleAuthKey   = flag.String("tailscale_authkey", "", "Authentication key to use with Tailscale")
-	tailscaleHostname  = flag.String("tailscale_hostname", "", "Hostname to use when registering with Tailscale")
-	tailscaleEphemeral = flag.Bool("tailscale_ephemeral", true, "Whether the Tailscale node should be registered as ephemeral.")
+	serverAddress         = flag.String("grpc_address", "configfs.tailbd60.ts.net:443", "Address to connect to server on")
+	kernelNetworking      = flag.Bool("kernel_networking", false, "Whether the server should just listen on kernel networking.")
+	mountPoint            = flag.String("mount_point", "/mnt/fusetest", "")
+	tailscaleDirectory    = flag.String("tailscale_directory", "", "Directory for storing Tailscale state")
+	tailscaleAuthKey      = flag.String("tailscale_authkey", "", "Authentication key to use with Tailscale")
+	tailscaleHostname     = flag.String("tailscale_hostname", "", "Hostname to use when registering with Tailscale")
+	tailscaleEphemeral    = flag.Bool("tailscale_ephemeral", true, "Whether the Tailscale node should be registered as ephemeral.")
+	tailscaleClientID     = flag.String("tailscale_client_id", "", "Client ID to use when authenticating with Tailscale")
+	tailscaleClientSecret = flag.String("tailscale_client_secret", "", "Client Secret to use when authenticating with Tailscale")
 )
 
 func run() {
@@ -36,9 +38,12 @@ func run() {
 	var s *tsnet.Server
 	if !*kernelNetworking {
 		s = &tsnet.Server{
-			Hostname: *tailscaleHostname,
-			AuthKey:  *tailscaleAuthKey,
-			Dir:      *tailscaleDirectory,
+			Hostname:     *tailscaleHostname,
+			AuthKey:      *tailscaleAuthKey,
+			Dir:          *tailscaleDirectory,
+			Ephemeral:    *tailscaleEphemeral,
+			ClientID:     *tailscaleClientID,
+			ClientSecret: *tailscaleClientSecret,
 		}
 		state, err := s.Up(ctx)
 		if err != nil {
