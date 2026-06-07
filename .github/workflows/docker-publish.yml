@@ -23,10 +23,10 @@ jobs:
         include:
           - name: server
             dockerfile: Dockerfile.server
-            image: ghcr.io/davefinster/certfs-server
+            image: ghcr.io/davefinster/configfs-server
           - name: client
             dockerfile: Dockerfile.client
-            image: ghcr.io/davefinster/certfs
+            image: ghcr.io/davefinster/configfs
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

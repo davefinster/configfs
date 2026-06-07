@@ -1,1 +1,1 @@
-# certfs
+# configfs
