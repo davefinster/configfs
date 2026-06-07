@@ -37,6 +37,7 @@ var (
 	tailscaleHostname  = flag.String("tailscale_hostname", "", "Hostname to use when registering with Tailscale")
 	tailscaleTags      = flag.String("tailscale_tags", "", "Comma separated list of Tailscale tags.")
 	tailscaleService   = flag.String("tailscale_service", "", "Name of the Tailscale service to listen on.")
+	tailscaleEphemeral = flag.Bool("tailscale_ephemeral", true, "Whether the Tailscale node should be registered as ephemeral.")
 	createAllowedTags  = flag.String("create_allowed_tags", "", "Comma separated identities (tags like tag:foo and users like user:alice@example.com) permitted to create new configs. Empty means no restriction. Does not affect updates or deletes, which use per-config ACLs.")
 )
 
@@ -75,9 +76,10 @@ func run() {
 	)
 	if !*kernelNetworking {
 		s = &tsnet.Server{
-			Hostname: *tailscaleHostname,
-			AuthKey:  *tailscaleAuthKey,
-			Dir:      *tailscaleDirectory,
+			Hostname:  *tailscaleHostname,
+			AuthKey:   *tailscaleAuthKey,
+			Dir:       *tailscaleDirectory,
+			Ephemeral: *tailscaleEphemeral,
 		}
 		if *tailscaleTags != "" {
 			tags := strings.Split(*tailscaleTags, ",")

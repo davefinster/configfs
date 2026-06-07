@@ -27,6 +27,7 @@ var (
 	tailscaleDirectory = flag.String("tailscale_directory", "", "Directory for storing Tailscale state")
 	tailscaleAuthKey   = flag.String("tailscale_authkey", "", "Authentication key to use with Tailscale")
 	tailscaleHostname  = flag.String("tailscale_hostname", "", "Hostname to use when registering with Tailscale")
+	tailscaleEphemeral = flag.Bool("tailscale_ephemeral", true, "Whether the Tailscale node should be registered as ephemeral.")
 )
 
 func run() {
