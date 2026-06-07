@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"os"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/property"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
@@ -35,7 +37,8 @@ func main() {
 }
 
 type Config struct {
-	Endpoint string `pulumi:"endpoint,optional"`
+	Endpoint         string `pulumi:"endpoint,optional"`
+	InsecureEndpoint bool   `pulumi:"insecureEndpoint,optional"`
 
 	client types.ConfigFSServerClient
 }
@@ -49,7 +52,11 @@ func (c *Config) Configure(ctx context.Context) error {
 	if endpoint == "" {
 		endpoint = "localhost:9090"
 	}
-	conn, err := grpc.NewClient(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	credentials := credentials.NewTLS(&tls.Config{})
+	if c.InsecureEndpoint {
+		credentials = insecure.NewCredentials()
+	}
+	conn, err := grpc.NewClient(endpoint, grpc.WithTransportCredentials(credentials))
 	if err != nil {
 		return fmt.Errorf("dialing ConfigFSServer at %q: %w", endpoint, err)
 	}

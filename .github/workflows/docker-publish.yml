@@ -1,4 +1,4 @@
-name: Build and publish Docker images
+name: Build and publish images and binaries
 
 on:
   push:
@@ -48,3 +48,44 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ matrix.image }}:latest
+
+  release-binaries:
+    name: release-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build standalone fs binaries (linux/amd64 + linux/arm64)
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            echo "Building linux/$arch"
+            # The fs client has no cgo deps (only the server uses sqlite), so a
+            # static CGO-free cross-compile keeps the binaries portable.
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+              go build -trimpath -ldflags="-s -w" -o fs ./cmd/fs
+            tar -czf "dist/fs-linux-$arch.tar.gz" fs
+            rm -f fs
+          done
+          ls -l dist
+
+      - name: Publish binaries to the rolling "latest" release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Recreate the rolling "latest" prerelease so its tag, target commit
+          # and assets always reflect the newest push to main.
+          gh release delete latest --cleanup-tag --yes 2>/dev/null || true
+          gh release create latest \
+            --prerelease \
+            --title "latest (main)" \
+            --notes "Standalone fs/client binaries built from ${{ github.sha }}." \
+            dist/*.tar.gz
