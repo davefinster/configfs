@@ -1,0 +1,7 @@
+*.db
+CLAUDE.md
+.claude/
+tmp/
+scratch
+.tailscale.server.flags
+.tailscale.fs.flags

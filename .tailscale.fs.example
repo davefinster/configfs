@@ -1,0 +1,8 @@
+# Local override for the FS client's tailscale_* flags, loaded by `make runFs`.
+# Copy to `.tailscale.fs.flags` (git- and docker-ignored) and fill in.
+# One "--name=value" per line; blank lines and '#' comments are ignored.
+# If the file is absent, the fs client uses its built-in flag defaults.
+
+--tailscale_authkey=tskey-auth-REPLACE_ME
+--tailscale_hostname=configfs-client
+--tailscale_directory=./scratch/tsclient

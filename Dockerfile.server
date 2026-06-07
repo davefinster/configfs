@@ -1,0 +1,10 @@
+FROM golang:alpine
+WORKDIR /root/project
+COPY . .
+RUN GOOS=linux go build -a -v ./cmd/server/main.go
+
+FROM alpine:latest
+RUN apk add --no-cache curl ca-certificates && mkdir -p /app
+COPY --from=0 /root/project/main /app/certfs-server
+RUN chmod +x /app/certfs-server
+ENTRYPOINT ["/app/certfs-server"]

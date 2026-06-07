@@ -1,0 +1,21 @@
+# Keep the Docker build context small and free of local state/secrets.
+# (Both Dockerfiles use `COPY . .`, so anything not excluded here is sent to the
+# builder — and would land in any exported build cache.)
+
+# Version control / CI
+.git
+.gitignore
+.github
+
+# Local agent / editor state
+.claude
+
+# Tailscale node state, local auth-key overrides, and databases — secrets, never
+# needed by the build
+scratch
+.tailscale.server.flags
+.tailscale.fs.flags
+*.db
+
+# Local build output
+tmp

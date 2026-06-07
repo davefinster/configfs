@@ -1,0 +1,78 @@
+syntax = "proto3";
+package configfs;
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+option go_package = "github.com/davefinster/configfs/internal/proto";
+
+// Acl is the access level granted by a ConfigAcl entry. WRITE implies READ.
+enum Acl {
+    UNKNOWN_ACL = 0;
+    READ = 1;
+    WRITE = 2;
+}
+
+// ConfigAcl grants an access level to either a specific Tailscale ACL tag or to
+// everyone. A config is accessible at a given level only if at least one of its
+// ConfigAcl entries grants that level to the caller; a config with no entries
+// is accessible to no one (deny by default).
+message ConfigAcl {
+    Acl acl = 1;
+    string tag = 2;
+    bool everyone = 3;
+}
+
+message Config {
+    string id = 1;
+    string name = 2;
+    optional bytes content = 3;
+    uint64 content_size = 4;
+    string path = 5;
+    repeated ConfigAcl acls = 6;
+}
+
+message Directory {
+    string id = 1;
+    string name = 2;
+    string path = 3;
+    repeated Directory directories = 4;
+    repeated Config configs = 5;
+}
+
+message ListRequest {
+    optional string directory_id = 1;
+}
+
+message ListResponse {
+    Directory top = 1;
+}
+
+message GetConfigRequest {
+    string id = 1;
+}
+
+message GetConfigResponse {
+    Config config = 1;
+}
+
+message SetConfigRequest {
+    Config config = 1;
+}
+
+message SetConfigResponse {
+    Config config = 1;
+}
+
+message DeleteConfigRequest {
+    string id = 1;
+}
+
+message DeleteConfigResponse {
+
+}
+
+service ConfigFSServer {
+  rpc List (ListRequest) returns (ListResponse) {}
+  rpc GetConfig (GetConfigRequest) returns (GetConfigResponse) {}
+  rpc SetConfig (SetConfigRequest) returns (SetConfigResponse) {}
+  rpc DeleteConfig (DeleteConfigRequest) returns (DeleteConfigResponse) {}
+}
