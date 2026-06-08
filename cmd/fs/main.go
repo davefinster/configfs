@@ -10,9 +10,11 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/davefinster/configfs/internal/fs"
 	"github.com/davefinster/configfs/internal/log"
+	"tailscale.com/client/local"
 
 	types "github.com/davefinster/configfs/internal/proto"
 	"google.golang.org/grpc"
@@ -30,6 +32,7 @@ var (
 	tailscaleEphemeral    = flag.Bool("tailscale_ephemeral", true, "Whether the Tailscale node should be registered as ephemeral.")
 	tailscaleClientID     = flag.String("tailscale_client_id", "", "Client ID to use when authenticating with Tailscale")
 	tailscaleClientSecret = flag.String("tailscale_client_secret", "", "Client Secret to use when authenticating with Tailscale")
+	tailscaleSocketPath   = flag.String("tailscale_socket_path", "", "Path at which the Tailscale socket can be found for detecting local Tailscale status.")
 )
 
 func run() {
@@ -59,6 +62,23 @@ func run() {
 		}
 		log.InfofCtx(ctx, "Tailscale server successfully started")
 		defer s.Close()
+	}
+	if *kernelNetworking && *tailscaleSocketPath != "" {
+		c := &local.Client{
+			UseSocketOnly: true,
+			Socket:        *tailscaleSocketPath,
+		}
+		c.UseSocketOnly = true
+		for {
+			s, err := c.Status(ctx)
+			if err != nil {
+				log.WarningfCtx(ctx, "error fetching tailscale status via socket: %s", err.Error())
+			} else if s.BackendState == "Running" {
+				break
+			}
+			log.InfofCtx(ctx, "Local Tailscale not yet running.")
+			time.Sleep(5 * time.Second)
+		}
 	}
 	creds := credentials.NewTLS(&tls.Config{})
 	opts := []grpc.DialOption{grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {

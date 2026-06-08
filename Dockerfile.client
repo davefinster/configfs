@@ -7,6 +7,6 @@ RUN CGO_ENABLED=1 GOOS=linux go build -a -v ./cmd/fs/main.go
 
 FROM alpine:latest
 RUN apk add --no-cache curl ca-certificates fuse3 findmnt && mkdir -p /app
-COPY --from=0 /root/project/main /app/certfs
-RUN chmod +x /app/certfs
-ENTRYPOINT ["/app/certfs"]
+COPY --from=0 /root/project/main /app/configfs
+RUN chmod +x /app/configfs
+ENTRYPOINT ["/app/configfs"]
