@@ -30,13 +30,14 @@ type RemoteConfigFS struct {
 }
 
 type RemoteConfigFSOptions struct {
-	Owner           *uint32
-	Group           *uint32
-	FileMode        *os.FileMode
-	Writable        bool
-	FSName          *string
-	FSSubtype       *string
-	RefreshInterval time.Duration
+	Owner                 *uint32
+	Group                 *uint32
+	FileMode              *os.FileMode
+	Writable              bool
+	FSName                *string
+	FSSubtype             *string
+	RefreshInterval       time.Duration
+	AdditionalACLOnCreate []*types.ConfigAcl
 }
 
 func NewRemoteConfigFS(client types.ConfigFSServerClient, mountPoint string, opts *RemoteConfigFSOptions) *RemoteConfigFS {

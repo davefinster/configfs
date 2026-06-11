@@ -33,6 +33,7 @@ var (
 	tailscaleClientID     = flag.String("tailscale_client_id", "", "Client ID to use when authenticating with Tailscale")
 	tailscaleClientSecret = flag.String("tailscale_client_secret", "", "Client Secret to use when authenticating with Tailscale")
 	tailscaleSocketPath   = flag.String("tailscale_socket_path", "", "Path at which the Tailscale socket can be found for detecting local Tailscale status.")
+	additionalACLOnCreate = flag.String("additional_acl_on_create", "", "tag:name@ACL comma separated list of ACLs to apply to newly created files.")
 )
 
 func run() {
@@ -95,7 +96,42 @@ func run() {
 	}
 	defer conn.Close()
 	grpcClient := types.NewConfigFSServerClient(conn)
-	remoteFS := fs.NewRemoteConfigFS(grpcClient, *mountPoint, nil)
+	root := uint32(0)
+	fileMode := os.FileMode(0o444)
+	fsOpts := &fs.RemoteConfigFSOptions{
+		Owner:           &root,
+		Group:           &root,
+		Writable:        true,
+		FileMode:        &fileMode,
+		RefreshInterval: 10 * time.Second,
+	}
+	aclParts := strings.Split(*additionalACLOnCreate, ",")
+	for _, aclPart := range aclParts {
+		if len(aclPart) == 0 {
+			continue
+		}
+		components := strings.Split(aclPart, "@")
+		if len(components) != 2 {
+			continue
+		}
+		if components[1] != "READ" && components[1] != "WRITE" {
+			continue
+		}
+		acl := &types.ConfigAcl{}
+		if components[0] == "everyone" {
+			acl.Everyone = true
+		} else {
+			acl.Tag = components[0]
+		}
+		if components[1] == "READ" {
+			acl.Acl = types.Acl_READ
+		}
+		if components[1] == "WRITE" {
+			acl.Acl = types.Acl_WRITE
+		}
+		fsOpts.AdditionalACLOnCreate = append(fsOpts.AdditionalACLOnCreate, acl)
+	}
+	remoteFS := fs.NewRemoteConfigFS(grpcClient, *mountPoint, fsOpts)
 	if err := remoteFS.LoadSnapshot(ctx); err != nil {
 		log.FatalfCtx(ctx, "error doing initial root load: %s", err.Error())
 	}
