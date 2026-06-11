@@ -26,6 +26,7 @@ var (
 	serverAddress         = flag.String("grpc_address", "configfs.tailbd60.ts.net:443", "Address to connect to server on")
 	kernelNetworking      = flag.Bool("kernel_networking", false, "Whether the server should just listen on kernel networking.")
 	mountPoint            = flag.String("mount_point", "/mnt/fusetest", "")
+	readOnly              = flag.Bool("read_only", false, "Whether the FUSE mount should be read-only. When set, the kernel rejects writes, creates and deletes.")
 	tailscaleDirectory    = flag.String("tailscale_directory", "", "Directory for storing Tailscale state")
 	tailscaleAuthKey      = flag.String("tailscale_authkey", "", "Authentication key to use with Tailscale")
 	tailscaleHostname     = flag.String("tailscale_hostname", "", "Hostname to use when registering with Tailscale")
@@ -101,7 +102,7 @@ func run() {
 	fsOpts := &fs.RemoteConfigFSOptions{
 		Owner:           &root,
 		Group:           &root,
-		Writable:        true,
+		Writable:        !*readOnly,
 		FileMode:        &fileMode,
 		RefreshInterval: 10 * time.Second,
 	}
