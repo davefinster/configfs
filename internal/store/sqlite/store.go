@@ -8,9 +8,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/davefinster/configfs/internal/log"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	sq "github.com/Masterminds/squirrel"
 	types "github.com/davefinster/configfs/internal/proto"
@@ -20,11 +22,16 @@ import (
 var schema = `
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS inode (id INTEGER PRIMARY KEY);
+-- created_at/updated_at columns hold unix nanoseconds; 0 means the row predates
+-- the columns (value unknown). config.updated_at bumps on every update,
+-- config_content.updated_at only when the content blob is rewritten.
 CREATE TABLE IF NOT EXISTS config (
 	id INTEGER PRIMARY KEY,
 	name TEXT NOT NULL,
 	content_size INTEGER NOT NULL,
-	path STRING NOT NULL
+	path STRING NOT NULL,
+	created_at INTEGER NOT NULL DEFAULT 0,
+	updated_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS directory (
 	id INTEGER PRIMARY KEY,
@@ -36,6 +43,8 @@ CREATE TABLE IF NOT EXISTS directory (
 CREATE TABLE IF NOT EXISTS config_content (
 	id INTEGER PRIMARY KEY,
 	content BLOB NOT NULL,
+	created_at INTEGER NOT NULL DEFAULT 0,
+	updated_at INTEGER NOT NULL DEFAULT 0,
 	FOREIGN KEY (id) REFERENCES config (id) ON DELETE CASCADE ON UPDATE NO ACTION
 );
 CREATE TABLE IF NOT EXISTS config_acl (
@@ -49,16 +58,39 @@ CREATE TABLE IF NOT EXISTS config_acl (
 CREATE INDEX IF NOT EXISTS config_acl_config_id ON config_acl (config_id);
 `
 
+// migrations are idempotent ALTERs that bring databases created before a
+// column existed up to the current schema. CREATE TABLE IF NOT EXISTS is a
+// no-op for existing tables, so any column added to the schema above must also
+// be added here; the "duplicate column name" error this produces on databases
+// that already have the column is expected and ignored.
+var migrations = []string{
+	`ALTER TABLE config ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE config ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE config_content ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE config_content ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0`,
+}
+
 type Store struct {
 	db  *sqlx.DB
 	sql sq.StatementBuilderType
+	// now is the time source for created_at/updated_at stamps; tests override it.
+	now func() time.Time
 }
 
 func NewStore(db *sqlx.DB) (*Store, error) {
 	db.MustExec(schema)
+	for _, migration := range migrations {
+		if _, err := db.Exec(migration); err != nil {
+			if strings.Contains(err.Error(), "duplicate column name") {
+				continue
+			}
+			return nil, fmt.Errorf("error applying migration %q: %w", migration, err)
+		}
+	}
 	return &Store{
 		db:  db,
 		sql: sq.StatementBuilder,
+		now: time.Now,
 	}, nil
 }
 
@@ -139,7 +171,7 @@ func (s *Store) TreeForACLTags(ctx context.Context, aclTags []string, prefix str
 			sq.Like{"path": prefix + "/%"},
 		})
 	}
-	builder := s.sql.Select("id", "name", "content_size", "path").From("config")
+	builder := s.sql.Select("id", "name", "content_size", "path", "created_at", "updated_at").From("config")
 	if len(where) > 0 {
 		builder = builder.Where(where)
 	}
@@ -175,6 +207,8 @@ func (s *Store) TreeForACLTags(ctx context.Context, aclTags []string, prefix str
 			Path:        c.Path,
 			ContentSize: uint64(c.ContentSize),
 			Acls:        aclsByConfig[c.ID],
+			CreatedAt:   timestampFromUnixNano(c.CreatedAt),
+			UpdatedAt:   timestampFromUnixNano(c.UpdatedAt),
 		}
 		// Only surface configs the caller is permitted to read.
 		if !config.Allows(aclTags, types.Acl_READ) {
@@ -345,6 +379,18 @@ type configSelect struct {
 	Name        string `db:"name"`
 	ContentSize int    `db:"content_size"`
 	Path        string `db:"path"`
+	CreatedAt   int64  `db:"created_at"`
+	UpdatedAt   int64  `db:"updated_at"`
+}
+
+// timestampFromUnixNano converts a stored unix-nanosecond value to a proto
+// timestamp. Zero (the default backfilled into rows that predate the
+// timestamp columns) means "unknown" and maps to an unset field.
+func timestampFromUnixNano(ns int64) *timestamppb.Timestamp {
+	if ns == 0 {
+		return nil
+	}
+	return timestamppb.New(time.Unix(0, ns))
 }
 
 type configContentSelect struct {
@@ -455,7 +501,7 @@ func (s *Store) replaceConfigACLs(ctx context.Context, configID int, acls []*typ
 }
 
 func (s *Store) getConfigByPathAndName(ctx context.Context, path string, name string) (*types.Config, error) {
-	sql, args, err := s.sql.Select("id", "name", "content_size", "path").From("config").Where(sq.Eq{
+	sql, args, err := s.sql.Select("id", "name", "content_size", "path", "created_at", "updated_at").From("config").Where(sq.Eq{
 		"name": name,
 		"path": path,
 	}).ToSql()
@@ -474,6 +520,8 @@ func (s *Store) getConfigByPathAndName(ctx context.Context, path string, name st
 		Name:        cs.Name,
 		ContentSize: uint64(cs.ContentSize),
 		Path:        cs.Path,
+		CreatedAt:   timestampFromUnixNano(cs.CreatedAt),
+		UpdatedAt:   timestampFromUnixNano(cs.UpdatedAt),
 	}, nil
 }
 
@@ -482,7 +530,7 @@ func (s *Store) GetConfigByID(ctx context.Context, id string, includeContent boo
 	if err != nil {
 		return nil, fmt.Errorf("unable to convert ID to number: %w", err)
 	}
-	sql, args, err := s.sql.Select("id", "name", "content_size", "path").From("config").Where(sq.Eq{
+	sql, args, err := s.sql.Select("id", "name", "content_size", "path", "created_at", "updated_at").From("config").Where(sq.Eq{
 		"id": numericID,
 	}).ToSql()
 	if err != nil {
@@ -506,6 +554,8 @@ func (s *Store) GetConfigByID(ctx context.Context, id string, includeContent boo
 		Acls:        acls,
 		ContentSize: uint64(cs.ContentSize),
 		Path:        cs.Path,
+		CreatedAt:   timestampFromUnixNano(cs.CreatedAt),
+		UpdatedAt:   timestampFromUnixNano(cs.UpdatedAt),
 	}
 	if includeContent {
 		contentSQL, contentArgs, err := s.sql.Select("id", "content").From("config_content").Where(sq.Eq{
@@ -556,11 +606,14 @@ func (s *Store) insert(ctx context.Context, config *types.Config) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("error getting inode for config creation: %w", err)
 	}
-	sql, args, err := s.sql.Insert("config").Columns("id", "name", "content_size", "path").Values(
+	now := s.now().UnixNano()
+	sql, args, err := s.sql.Insert("config").Columns("id", "name", "content_size", "path", "created_at", "updated_at").Values(
 		configInode,
 		config.GetName(),
 		int(config.GetContentSize()),
 		config.GetPath(),
+		now,
+		now,
 	).ToSql()
 	if err != nil {
 		return 0, fmt.Errorf("error creating sql to insert config: %w", err)
@@ -574,9 +627,11 @@ func (s *Store) insert(ctx context.Context, config *types.Config) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("error fetching inserted inode: %w", err)
 	}
-	contentSQL, contentArgs, err := s.sql.Insert("config_content").Columns("id", "content").Values(
+	contentSQL, contentArgs, err := s.sql.Insert("config_content").Columns("id", "content", "created_at", "updated_at").Values(
 		insertedInode,
 		config.GetContent(),
+		now,
+		now,
 	).ToSql()
 	if err != nil {
 		return 0, fmt.Errorf("error creating sql to insert config content: %w", err)
@@ -596,23 +651,32 @@ func (s *Store) update(ctx context.Context, config *types.Config) error {
 		return fmt.Errorf("unable to convert ID to number: %w", err)
 	}
 	q := s.querier(ctx)
+	now := s.now().UnixNano()
+	// Every update bumps config.updated_at, including ACL-only ones where the
+	// content blob is untouched.
+	configSet := map[string]interface{}{
+		"updated_at": now,
+	}
+	if config.Content != nil {
+		configSet["content_size"] = config.GetContentSize()
+	}
+	sql, args, err := s.sql.Update("config").SetMap(configSet).Where(sq.Eq{"id": numericID}).ToSql()
+	if err != nil {
+		return fmt.Errorf("error creating sql to update config: %w", err)
+	}
+	if _, err := q.ExecContext(ctx, sql, args...); err != nil {
+		return fmt.Errorf("error updating config: %w", err)
+	}
 	// The proto content field is optional; a nil slice means "leave content
 	// unchanged", letting callers update ACLs (or other metadata) without
 	// resending the blob. Skipping the UPDATE also avoids writing NULL into the
 	// NOT NULL content column, which would abort the whole upsert transaction
-	// and silently drop the ACL change.
+	// and silently drop the ACL change. config_content.updated_at therefore
+	// only moves when the blob is actually rewritten.
 	if config.Content != nil {
-		sql, args, err := s.sql.Update("config").SetMap(map[string]interface{}{
-			"content_size": config.GetContentSize(),
-		}).Where(sq.Eq{"id": numericID}).ToSql()
-		if err != nil {
-			return fmt.Errorf("error creating sql to update config: %w", err)
-		}
-		if _, err := q.ExecContext(ctx, sql, args...); err != nil {
-			return fmt.Errorf("error updating config: %w", err)
-		}
 		contentSQL, contentArgs, err := s.sql.Update("config_content").SetMap(map[string]interface{}{
-			"content": config.GetContent(),
+			"content":    config.GetContent(),
+			"updated_at": now,
 		}).Where(sq.Eq{"id": numericID}).ToSql()
 		if err != nil {
 			return fmt.Errorf("error creating sql to update config content: %w", err)

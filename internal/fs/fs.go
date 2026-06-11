@@ -436,6 +436,18 @@ func (f Config) Attr(ctx context.Context, a *fuse.Attr) error {
 	c := f.snapshot.Config(f.id)
 	a.Inode = c.NumericalInode()
 	a.Size = c.GetContentSize()
+	// Configs stored before the server tracked timestamps have them unset; keep
+	// the attr times zeroed in that case rather than reporting a bogus instant.
+	// created_at has no home here: fuse.Attr carries no birth time (Linux FUSE
+	// GETATTR has no such field), so it stays API-only.
+	if updated := c.GetUpdatedAt(); updated != nil {
+		// updated_at moves on any modification (content or ACL), which is ctime
+		// semantics; it is also the closest available stand-in for mtime and
+		// atime since the server tracks neither content-only nor access times.
+		a.Mtime = updated.AsTime()
+		a.Ctime = updated.AsTime()
+		a.Atime = updated.AsTime()
+	}
 	mergeOptsWithAttr(f.opts, a)
 	fmt.Printf("Config Attr (%s): %+v\n", c.GetName(), a)
 	return nil

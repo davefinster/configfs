@@ -10,7 +10,7 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	_ "google.golang.org/protobuf/types/known/durationpb"
-	_ "google.golang.org/protobuf/types/known/timestamppb"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -138,13 +138,18 @@ func (x *ConfigAcl) GetEveryone() bool {
 }
 
 type Config struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Content       []byte                 `protobuf:"bytes,3,opt,name=content,proto3,oneof" json:"content,omitempty"`
-	ContentSize   uint64                 `protobuf:"varint,4,opt,name=content_size,json=contentSize,proto3" json:"content_size,omitempty"`
-	Path          string                 `protobuf:"bytes,5,opt,name=path,proto3" json:"path,omitempty"`
-	Acls          []*ConfigAcl           `protobuf:"bytes,6,rep,name=acls,proto3" json:"acls,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name        string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Content     []byte                 `protobuf:"bytes,3,opt,name=content,proto3,oneof" json:"content,omitempty"`
+	ContentSize uint64                 `protobuf:"varint,4,opt,name=content_size,json=contentSize,proto3" json:"content_size,omitempty"`
+	Path        string                 `protobuf:"bytes,5,opt,name=path,proto3" json:"path,omitempty"`
+	Acls        []*ConfigAcl           `protobuf:"bytes,6,rep,name=acls,proto3" json:"acls,omitempty"`
+	// Server-maintained: stamped on creation and on every successful update.
+	// Values supplied by clients on SetConfig are ignored. Unset on configs
+	// stored before timestamps were tracked.
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -217,6 +222,20 @@ func (x *Config) GetPath() string {
 func (x *Config) GetAcls() []*ConfigAcl {
 	if x != nil {
 		return x.Acls
+	}
+	return nil
+}
+
+func (x *Config) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *Config) GetUpdatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedAt
 	}
 	return nil
 }
@@ -649,14 +668,18 @@ const file_configfs_proto_rawDesc = "" +
 	"\tConfigAcl\x12\x1f\n" +
 	"\x03acl\x18\x01 \x01(\x0e2\r.configfs.AclR\x03acl\x12\x10\n" +
 	"\x03tag\x18\x02 \x01(\tR\x03tag\x12\x1a\n" +
-	"\beveryone\x18\x03 \x01(\bR\beveryone\"\xb7\x01\n" +
+	"\beveryone\x18\x03 \x01(\bR\beveryone\"\xad\x02\n" +
 	"\x06Config\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
 	"\acontent\x18\x03 \x01(\fH\x00R\acontent\x88\x01\x01\x12!\n" +
 	"\fcontent_size\x18\x04 \x01(\x04R\vcontentSize\x12\x12\n" +
 	"\x04path\x18\x05 \x01(\tR\x04path\x12'\n" +
-	"\x04acls\x18\x06 \x03(\v2\x13.configfs.ConfigAclR\x04aclsB\n" +
+	"\x04acls\x18\x06 \x03(\v2\x13.configfs.ConfigAclR\x04acls\x129\n" +
+	"\n" +
+	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"\n" +
+	"updated_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAtB\n" +
 	"\n" +
 	"\b_content\"\xa6\x01\n" +
 	"\tDirectory\x12\x0e\n" +
@@ -706,41 +729,44 @@ func file_configfs_proto_rawDescGZIP() []byte {
 var file_configfs_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_configfs_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_configfs_proto_goTypes = []any{
-	(Acl)(0),                     // 0: configfs.Acl
-	(*ConfigAcl)(nil),            // 1: configfs.ConfigAcl
-	(*Config)(nil),               // 2: configfs.Config
-	(*Directory)(nil),            // 3: configfs.Directory
-	(*ListRequest)(nil),          // 4: configfs.ListRequest
-	(*ListResponse)(nil),         // 5: configfs.ListResponse
-	(*GetConfigRequest)(nil),     // 6: configfs.GetConfigRequest
-	(*GetConfigResponse)(nil),    // 7: configfs.GetConfigResponse
-	(*SetConfigRequest)(nil),     // 8: configfs.SetConfigRequest
-	(*SetConfigResponse)(nil),    // 9: configfs.SetConfigResponse
-	(*DeleteConfigRequest)(nil),  // 10: configfs.DeleteConfigRequest
-	(*DeleteConfigResponse)(nil), // 11: configfs.DeleteConfigResponse
+	(Acl)(0),                      // 0: configfs.Acl
+	(*ConfigAcl)(nil),             // 1: configfs.ConfigAcl
+	(*Config)(nil),                // 2: configfs.Config
+	(*Directory)(nil),             // 3: configfs.Directory
+	(*ListRequest)(nil),           // 4: configfs.ListRequest
+	(*ListResponse)(nil),          // 5: configfs.ListResponse
+	(*GetConfigRequest)(nil),      // 6: configfs.GetConfigRequest
+	(*GetConfigResponse)(nil),     // 7: configfs.GetConfigResponse
+	(*SetConfigRequest)(nil),      // 8: configfs.SetConfigRequest
+	(*SetConfigResponse)(nil),     // 9: configfs.SetConfigResponse
+	(*DeleteConfigRequest)(nil),   // 10: configfs.DeleteConfigRequest
+	(*DeleteConfigResponse)(nil),  // 11: configfs.DeleteConfigResponse
+	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
 }
 var file_configfs_proto_depIdxs = []int32{
 	0,  // 0: configfs.ConfigAcl.acl:type_name -> configfs.Acl
 	1,  // 1: configfs.Config.acls:type_name -> configfs.ConfigAcl
-	3,  // 2: configfs.Directory.directories:type_name -> configfs.Directory
-	2,  // 3: configfs.Directory.configs:type_name -> configfs.Config
-	3,  // 4: configfs.ListResponse.top:type_name -> configfs.Directory
-	2,  // 5: configfs.GetConfigResponse.config:type_name -> configfs.Config
-	2,  // 6: configfs.SetConfigRequest.config:type_name -> configfs.Config
-	2,  // 7: configfs.SetConfigResponse.config:type_name -> configfs.Config
-	4,  // 8: configfs.ConfigFSServer.List:input_type -> configfs.ListRequest
-	6,  // 9: configfs.ConfigFSServer.GetConfig:input_type -> configfs.GetConfigRequest
-	8,  // 10: configfs.ConfigFSServer.SetConfig:input_type -> configfs.SetConfigRequest
-	10, // 11: configfs.ConfigFSServer.DeleteConfig:input_type -> configfs.DeleteConfigRequest
-	5,  // 12: configfs.ConfigFSServer.List:output_type -> configfs.ListResponse
-	7,  // 13: configfs.ConfigFSServer.GetConfig:output_type -> configfs.GetConfigResponse
-	9,  // 14: configfs.ConfigFSServer.SetConfig:output_type -> configfs.SetConfigResponse
-	11, // 15: configfs.ConfigFSServer.DeleteConfig:output_type -> configfs.DeleteConfigResponse
-	12, // [12:16] is the sub-list for method output_type
-	8,  // [8:12] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	12, // 2: configfs.Config.created_at:type_name -> google.protobuf.Timestamp
+	12, // 3: configfs.Config.updated_at:type_name -> google.protobuf.Timestamp
+	3,  // 4: configfs.Directory.directories:type_name -> configfs.Directory
+	2,  // 5: configfs.Directory.configs:type_name -> configfs.Config
+	3,  // 6: configfs.ListResponse.top:type_name -> configfs.Directory
+	2,  // 7: configfs.GetConfigResponse.config:type_name -> configfs.Config
+	2,  // 8: configfs.SetConfigRequest.config:type_name -> configfs.Config
+	2,  // 9: configfs.SetConfigResponse.config:type_name -> configfs.Config
+	4,  // 10: configfs.ConfigFSServer.List:input_type -> configfs.ListRequest
+	6,  // 11: configfs.ConfigFSServer.GetConfig:input_type -> configfs.GetConfigRequest
+	8,  // 12: configfs.ConfigFSServer.SetConfig:input_type -> configfs.SetConfigRequest
+	10, // 13: configfs.ConfigFSServer.DeleteConfig:input_type -> configfs.DeleteConfigRequest
+	5,  // 14: configfs.ConfigFSServer.List:output_type -> configfs.ListResponse
+	7,  // 15: configfs.ConfigFSServer.GetConfig:output_type -> configfs.GetConfigResponse
+	9,  // 16: configfs.ConfigFSServer.SetConfig:output_type -> configfs.SetConfigResponse
+	11, // 17: configfs.ConfigFSServer.DeleteConfig:output_type -> configfs.DeleteConfigResponse
+	14, // [14:18] is the sub-list for method output_type
+	10, // [10:14] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_configfs_proto_init() }

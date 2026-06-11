@@ -28,6 +28,11 @@ message Config {
     uint64 content_size = 4;
     string path = 5;
     repeated ConfigAcl acls = 6;
+    // Server-maintained: stamped on creation and on every successful update.
+    // Values supplied by clients on SetConfig are ignored. Unset on configs
+    // stored before timestamps were tracked.
+    google.protobuf.Timestamp created_at = 7;
+    google.protobuf.Timestamp updated_at = 8;
 }
 
 message Directory {
