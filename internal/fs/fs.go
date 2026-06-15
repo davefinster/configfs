@@ -21,6 +21,7 @@ type RemoteConfigFS struct {
 	client     types.ConfigFSServerClient
 	mountPoint string
 	opts       *RemoteConfigFSOptions
+	access     *accessTimes
 
 	mu                       sync.Mutex
 	fuseMount                *fuse.Conn
@@ -58,6 +59,7 @@ func NewRemoteConfigFS(client types.ConfigFSServerClient, mountPoint string, opt
 		client:     client,
 		mountPoint: mountPoint,
 		opts:       o,
+		access:     newAccessTimes(),
 	}
 }
 
@@ -198,6 +200,7 @@ func (s *RemoteConfigFS) Root() (fs.Node, error) {
 			path:     "/",
 			snapshot: s.snapshot,
 			opts:     s.opts,
+			access:   s.access,
 		}
 	}
 	return s.root, nil
@@ -346,11 +349,55 @@ func mergeOptsWithAttr(opts *RemoteConfigFSOptions, a *fuse.Attr) {
 	}
 }
 
+// accessTimes records, in memory only, the last time each config (keyed by its
+// id) was read through the mount. It is session-scoped: nothing is persisted, so
+// the recorded times reset whenever the client restarts. It backs the atime
+// attribute, which the server cannot supply — the server tracks only updated_at
+// (a modification time), never access. Methods are safe to call on a nil
+// *accessTimes, which behaves as an empty tracker so nodes constructed without
+// one (e.g. in tests) degrade gracefully rather than panicking.
+type accessTimes struct {
+	// now is the time source for recorded accesses; tests override it.
+	now func() time.Time
+
+	mu    sync.Mutex
+	times map[string]time.Time
+}
+
+func newAccessTimes() *accessTimes {
+	return &accessTimes{
+		now:   time.Now,
+		times: map[string]time.Time{},
+	}
+}
+
+// touch records that the config with the given id was just accessed.
+func (a *accessTimes) touch(id string) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.times[id] = a.now()
+}
+
+// get returns the last recorded access time for id and whether one exists.
+func (a *accessTimes) get(id string) (time.Time, bool) {
+	if a == nil {
+		return time.Time{}, false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	t, ok := a.times[id]
+	return t, ok
+}
+
 // Dir implements both Node and Handle for the root directory.
 type Dir struct {
 	path     string
 	snapshot *FilesystemSnapshot
 	opts     *RemoteConfigFSOptions
+	access   *accessTimes
 }
 
 func (d *Dir) dir() *types.Directory {
@@ -369,13 +416,13 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	dir := d.dir()
 	for _, dir := range dir.GetDirectories() {
 		if dir.Name == name {
-			return &Dir{snapshot: d.snapshot, opts: d.opts, path: dir.FullPath()}, nil
+			return &Dir{snapshot: d.snapshot, opts: d.opts, path: dir.FullPath(), access: d.access}, nil
 		}
 	}
 	for _, conf := range dir.GetConfigs() {
 		fmt.Printf("Lookup(%s) returning config %q\n", d.path, conf.GetName())
 		if conf.Name == name {
-			return &Config{id: conf.GetId(), snapshot: d.snapshot, opts: d.opts}, nil
+			return &Config{id: conf.GetId(), snapshot: d.snapshot, opts: d.opts, access: d.access}, nil
 		}
 	}
 	return nil, syscall.ENOENT
@@ -399,7 +446,7 @@ func (d *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.Cr
 	if err != nil {
 		return nil, nil, err
 	}
-	con := &Config{id: created.GetId(), snapshot: d.snapshot, opts: d.opts}
+	con := &Config{id: created.GetId(), snapshot: d.snapshot, opts: d.opts, access: d.access}
 	con.Attr(ctx, &resp.Attr)
 	return con, con, nil
 }
@@ -430,6 +477,7 @@ type Config struct {
 	id       string
 	snapshot *FilesystemSnapshot
 	opts     *RemoteConfigFSOptions
+	access   *accessTimes
 }
 
 func (f Config) Attr(ctx context.Context, a *fuse.Attr) error {
@@ -442,11 +490,17 @@ func (f Config) Attr(ctx context.Context, a *fuse.Attr) error {
 	// GETATTR has no such field), so it stays API-only.
 	if updated := c.GetUpdatedAt(); updated != nil {
 		// updated_at moves on any modification (content or ACL), which is ctime
-		// semantics; it is also the closest available stand-in for mtime and
-		// atime since the server tracks neither content-only nor access times.
+		// semantics; it is also the closest available stand-in for mtime and, until
+		// the file is first read this session, atime — the server tracks neither
+		// content-only nor access times.
 		a.Mtime = updated.AsTime()
 		a.Ctime = updated.AsTime()
 		a.Atime = updated.AsTime()
+	}
+	// atime is tracked client-side in memory: once the file has been read through
+	// the mount this session, report that access time in preference to updated_at.
+	if accessed, ok := f.access.get(f.id); ok {
+		a.Atime = accessed
 	}
 	mergeOptsWithAttr(f.opts, a)
 	fmt.Printf("Config Attr (%s): %+v\n", c.GetName(), a)
@@ -458,6 +512,8 @@ func (f Config) ReadAll(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error fetching config content: %w", err)
 	}
+	// Record the read so atime reflects genuine reads through the mount.
+	f.access.touch(f.id)
 	return fullConfig.GetContent(), nil
 }
 

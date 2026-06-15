@@ -78,6 +78,23 @@ type Store struct {
 }
 
 func NewStore(db *sqlx.DB) (*Store, error) {
+	// Serialize all access through a single physical connection. SQLite permits
+	// only one writer at a time; with the default (unlimited) pool, concurrent
+	// SetConfig calls start their transactions on separate connections and race
+	// for the write lock, so the loser fails immediately with "database is
+	// locked" (SQLITE_BUSY). go-sqlite3's default deferred BEGIN makes this worse:
+	// each transaction opens as a reader and only upgrades to a writer on its
+	// first INSERT/UPDATE, the exact lock-upgrade case where SQLite returns BUSY
+	// without waiting on any busy handler. Capping the pool at one connection
+	// makes database/sql queue concurrent callers instead: a second transaction
+	// blocks in BeginTxx until the in-flight one releases the connection (commit
+	// or rollback), i.e. it waits for the inflight transaction to complete rather
+	// than failing. The wait respects the caller's context, so a cancelled or
+	// timed-out request still unblocks. This is safe from self-deadlock because no
+	// single operation needs two connections at once: queries inside a
+	// transaction run on the tx connection (querier(ctx) returns the tx) and the
+	// API layer never nests a bare-db query inside an open transaction.
+	db.SetMaxOpenConns(1)
 	db.MustExec(schema)
 	for _, migration := range migrations {
 		if _, err := db.Exec(migration); err != nil {

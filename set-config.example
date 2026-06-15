@@ -1,0 +1,28 @@
+# Example request body for the ConfigFSServer/SetConfig RPC, formatted for
+# grpcurl's -d flag (protojson). The server enables gRPC reflection, so no
+# -proto / -import-path is needed.
+#
+# grpcurl parses -d with protojson, which rejects comments, so strip these
+# leading #-lines before sending. The pipe below does that inline:
+#
+#   grep -v '^#' set-config.example | grpcurl -d @ HOST:443 configfs.ConfigFSServer/SetConfig
+#
+# or, once the comment block has been deleted:
+#
+#   grpcurl -d @ HOST:443 configfs.ConfigFSServer/SetConfig < set-config.example
+#
+# HOST is the server's address. The server serves TLS (cert provisioned by
+# Tailscale for its MagicDNS name), so use the real hostname and no -insecure;
+# add -plaintext only against a server deliberately exposed without TLS.
+#
+  "config": {
+    "name": "app-config",
+    "path": "/services/web",
+    "content": "bG9nX2xldmVsID0gaW5mbwptYXhfY29ubmVjdGlvbnMgPSAxMDAK",
+    "contentSize": "39",
+    "acls": [
+      { "acl": "WRITE", "tag": "tag:web" },
+      { "acl": "READ", "everyone": true }
+    ]
+  }
+}
