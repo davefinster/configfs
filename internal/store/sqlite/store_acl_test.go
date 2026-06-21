@@ -47,6 +47,7 @@ func collectConfigs(d *types.Directory) map[string]*types.Config {
 func TestUpsertPersistsAndLoadsACLs(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
+	mkdirAll(t, s, "/a/b")
 
 	saved, err := s.Upsert(ctx, &types.Config{
 		Name: "cfg",
@@ -62,7 +63,7 @@ func TestUpsertPersistsAndLoadsACLs(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	got, err := s.GetConfigByID(ctx, saved.GetId(), false)
+	got, err := s.GetConfigByID(ctx, saved.GetId(), false, "")
 	if err != nil {
 		t.Fatalf("GetConfigByID: %v", err)
 	}
@@ -82,6 +83,7 @@ func TestUpsertPersistsAndLoadsACLs(t *testing.T) {
 func TestTreeForACLTagsFiltersByReadAccess(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
+	mkdirAll(t, s, "/x")
 
 	mustUpsert := func(name string, acls []*types.ConfigAcl) {
 		t.Helper()
@@ -133,6 +135,7 @@ func TestTreeForACLTagsFiltersByReadAccess(t *testing.T) {
 func TestUpsertReplacesACLs(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
+	mkdirAll(t, s, "/a")
 
 	saved, err := s.Upsert(ctx, &types.Config{
 		Name:        "cfg",
@@ -156,7 +159,7 @@ func TestUpsertReplacesACLs(t *testing.T) {
 		t.Fatalf("update Upsert: %v", err)
 	}
 
-	got, err := s.GetConfigByID(ctx, saved.GetId(), false)
+	got, err := s.GetConfigByID(ctx, saved.GetId(), false, "")
 	if err != nil {
 		t.Fatalf("GetConfigByID: %v", err)
 	}
@@ -172,6 +175,7 @@ func TestUpsertReplacesACLs(t *testing.T) {
 func TestDeleteRemovesACLs(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
+	mkdirAll(t, s, "/a")
 
 	saved, err := s.Upsert(ctx, &types.Config{
 		Name: "cfg",
@@ -194,7 +198,7 @@ func TestDeleteRemovesACLs(t *testing.T) {
 	if n := aclRowCount(t, s, saved.GetId()); n != 0 {
 		t.Errorf("config_acl rows after delete = %d, want 0 (orphaned acl rows)", n)
 	}
-	got, err := s.GetConfigByID(ctx, saved.GetId(), false)
+	got, err := s.GetConfigByID(ctx, saved.GetId(), false, "")
 	if err != nil {
 		t.Fatalf("GetConfigByID after delete: %v", err)
 	}

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -51,18 +52,34 @@ func loadDirectories(t *testing.T, s *Store) map[string]testDirectoryRow {
 	return out
 }
 
-func TestUpsertCreatesThreeDeepDirectoryHierarchy(t *testing.T) {
+// mkdirAll ensures every directory along fullPath exists (transparent, no ACL) so
+// a config can be written into it. Directories are no longer auto-created on the
+// config write path, so tests must materialise them first; this is the test-side
+// stand-in for the mkdir -p that Upsert used to perform implicitly.
+func mkdirAll(t *testing.T, s *Store, fullPath string) {
+	t.Helper()
+	if _, err := s.ensureDirectories(context.Background(), fullPath, nil); err != nil {
+		t.Fatalf("ensureDirectories(%q): %v", fullPath, err)
+	}
+}
+
+func TestCreateDirectoryCreatesThreeDeepHierarchy(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 
-	if _, err := s.Upsert(ctx, &types.Config{
-		Name:        "cfg",
-		Path:        "/a/b/c",
-		Acls:        []*types.ConfigAcl{{Acl: types.Acl_READ, Tag: "tag:test"}},
-		ContentSize: 3,
-		Content:     []byte("xyz"),
-	}); err != nil {
-		t.Fatalf("Upsert: %v", err)
+	acls := []*types.ConfigAcl{{Acl: types.Acl_READ, Tag: "tag:test"}}
+	// Creating /a/b/c auto-creates the missing ancestors /a and /a/b too, each
+	// carrying the supplied acls (option: apply the ACL to every created level).
+	leaf, err := s.CreateDirectory(ctx, &types.Directory{
+		Name: "c",
+		Path: "/a/b",
+		Acls: acls,
+	})
+	if err != nil {
+		t.Fatalf("CreateDirectory: %v", err)
+	}
+	if leaf.FullPath() != "/a/b/c" {
+		t.Errorf("created leaf full path = %q, want /a/b/c", leaf.FullPath())
 	}
 
 	dirs := loadDirectories(t, s)
@@ -94,31 +111,38 @@ func TestUpsertCreatesThreeDeepDirectoryHierarchy(t *testing.T) {
 	if c.ParentID == nil || *c.ParentID != b.ID {
 		t.Errorf("/a/b/c parent_id should be %d, got %v", b.ID, c.ParentID)
 	}
+
+	// Every created level carries the supplied ACL.
+	for _, full := range []string{"/a", "/a/b", "/a/b/c"} {
+		got, err := s.GetDirectoryByID(ctx, fmt.Sprintf("%d", dirs[full].ID))
+		if err != nil {
+			t.Fatalf("GetDirectoryByID(%s): %v", full, err)
+		}
+		if len(got.GetAcls()) != 1 || got.GetAcls()[0].GetTag() != "tag:test" {
+			t.Errorf("directory %q acls = %+v, want a single tag:test READ entry", full, got.GetAcls())
+		}
+	}
 }
 
-func TestUpsertReusesExistingDirectoriesAndCreatesNew(t *testing.T) {
+func TestCreateDirectoryReusesExistingDirectoriesAndCreatesNew(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 
-	if _, err := s.Upsert(ctx, &types.Config{
-		Name:        "first",
-		Path:        "/a/b/c",
-		Acls:        []*types.ConfigAcl{{Acl: types.Acl_READ, Tag: "tag:test"}},
-		ContentSize: 3,
-		Content:     []byte("xyz"),
+	if _, err := s.CreateDirectory(ctx, &types.Directory{
+		Name: "c",
+		Path: "/a/b",
+		Acls: []*types.ConfigAcl{{Acl: types.Acl_READ, Tag: "tag:test"}},
 	}); err != nil {
-		t.Fatalf("first Upsert: %v", err)
+		t.Fatalf("first CreateDirectory: %v", err)
 	}
 	initial := loadDirectories(t, s)
 
-	if _, err := s.Upsert(ctx, &types.Config{
-		Name:        "second",
-		Path:        "/a/x/y",
-		Acls:        []*types.ConfigAcl{{Acl: types.Acl_READ, Tag: "tag:test"}},
-		ContentSize: 3,
-		Content:     []byte("xyz"),
+	if _, err := s.CreateDirectory(ctx, &types.Directory{
+		Name: "y",
+		Path: "/a/x",
+		Acls: []*types.ConfigAcl{{Acl: types.Acl_READ, Tag: "tag:test"}},
 	}); err != nil {
-		t.Fatalf("second Upsert: %v", err)
+		t.Fatalf("second CreateDirectory: %v", err)
 	}
 	final := loadDirectories(t, s)
 

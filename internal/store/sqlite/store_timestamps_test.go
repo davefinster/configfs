@@ -15,10 +15,14 @@ type timestampRow struct {
 	UpdatedAt int64 `db:"updated_at"`
 }
 
-func contentTimestamps(t *testing.T, s *Store, id string) timestampRow {
+// contentTimestamps returns the timestamps of a config's current content
+// version (the row config.current_content_id points at). With content
+// versioning a config can have several config_content rows, so this resolves the
+// live one rather than assuming config_content.id == config id.
+func contentTimestamps(t *testing.T, s *Store, configID string) timestampRow {
 	t.Helper()
 	row := timestampRow{}
-	if err := s.db.Get(&row, "SELECT created_at, updated_at FROM config_content WHERE id = ?", id); err != nil {
+	if err := s.db.Get(&row, "SELECT created_at, updated_at FROM config_content WHERE id = (SELECT current_content_id FROM config WHERE id = ?)", configID); err != nil {
 		t.Fatalf("load config_content timestamps: %v", err)
 	}
 	return row
@@ -27,6 +31,7 @@ func contentTimestamps(t *testing.T, s *Store, id string) timestampRow {
 func TestUpsertStampsCreatedAtAndUpdatedAt(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
+	mkdirAll(t, s, "/a")
 	t0 := time.Date(2026, 6, 11, 10, 0, 0, 123456789, time.UTC)
 	current := t0
 	s.now = func() time.Time { return current }
@@ -51,7 +56,9 @@ func TestUpsertStampsCreatedAtAndUpdatedAt(t *testing.T) {
 		t.Errorf("config_content timestamps after create = %+v, want both %d", row, t0.UnixNano())
 	}
 
-	// A content update keeps created_at and bumps updated_at on both tables.
+	// A content update keeps the config's created_at and bumps its updated_at,
+	// while spawning a brand-new immutable content version whose own created_at
+	// and updated_at are both stamped fresh (it is a new row, not a rewrite).
 	t1 := t0.Add(time.Minute)
 	current = t1
 	updated, err := s.Upsert(ctx, &types.Config{
@@ -71,8 +78,8 @@ func TestUpsertStampsCreatedAtAndUpdatedAt(t *testing.T) {
 	if !updated.GetUpdatedAt().AsTime().Equal(t1) {
 		t.Errorf("updated_at after content update = %v, want %v", updated.GetUpdatedAt().AsTime(), t1)
 	}
-	if row := contentTimestamps(t, s, created.GetId()); row.CreatedAt != t0.UnixNano() || row.UpdatedAt != t1.UnixNano() {
-		t.Errorf("config_content timestamps after content update = %+v, want created %d updated %d", row, t0.UnixNano(), t1.UnixNano())
+	if row := contentTimestamps(t, s, created.GetId()); row.CreatedAt != t1.UnixNano() || row.UpdatedAt != t1.UnixNano() {
+		t.Errorf("new content version timestamps after content update = %+v, want both %d", row, t1.UnixNano())
 	}
 
 	// An ACL-only update (nil content) still bumps config.updated_at but leaves
@@ -170,7 +177,7 @@ func TestNewStoreMigratesPreTimestampDatabase(t *testing.T) {
 	}
 
 	// Rows that predate the columns report unknown (unset) timestamps.
-	legacy, err := s.GetConfigByID(ctx, "2", true)
+	legacy, err := s.GetConfigByID(ctx, "2", true, "")
 	if err != nil {
 		t.Fatalf("GetConfigByID: %v", err)
 	}
@@ -182,6 +189,21 @@ func TestNewStoreMigratesPreTimestampDatabase(t *testing.T) {
 	}
 	if string(legacy.GetContent()) != "xyz" {
 		t.Errorf("legacy config content = %q, want %q", legacy.GetContent(), "xyz")
+	}
+	// content_size was relocated onto config_content and backfilled from the blob
+	// length (len("xyz") == 3), and the old config.content_size column was dropped.
+	if legacy.GetContentSize() != 3 {
+		t.Errorf("legacy config content_size = %d, want 3 (backfilled from content length)", legacy.GetContentSize())
+	}
+	if has, err := tableHasColumn(db, "config", "content_size"); err != nil {
+		t.Fatalf("tableHasColumn(config, content_size): %v", err)
+	} else if has {
+		t.Error("config.content_size column should have been dropped by migration")
+	}
+	if has, err := tableHasColumn(db, "config_content", "content_size"); err != nil {
+		t.Fatalf("tableHasColumn(config_content, content_size): %v", err)
+	} else if !has {
+		t.Error("config_content.content_size column should exist after migration")
 	}
 
 	// Updating a legacy config stamps updated_at but leaves created_at unknown.

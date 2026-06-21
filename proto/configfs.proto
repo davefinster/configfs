@@ -33,6 +33,12 @@ message Config {
     // stored before timestamps were tracked.
     google.protobuf.Timestamp created_at = 7;
     google.protobuf.Timestamp updated_at = 8;
+    // ID of the config_content row currently referenced by this config (its
+    // latest version). Server-maintained: each SetConfig that changes the
+    // content writes a new config_content row and repoints this. Pass it (or any
+    // prior value the client has retained) as GetConfigRequest.version to fetch a
+    // specific version. Empty on configs that predate content versioning.
+    string current_content_id = 9;
 }
 
 message Directory {
@@ -41,6 +47,14 @@ message Directory {
     string path = 3;
     repeated Directory directories = 4;
     repeated Config configs = 5;
+    // A directory's ACL is an optional path gate. A directory with no entries
+    // imposes no restriction (it is transparent, so directories created
+    // implicitly or before directory ACLs existed never lock out the configs
+    // beneath them); a directory that does carry entries is enforced like a
+    // Config (deny-by-default among the entries present). Reading a config or
+    // listing requires READ on every ancestor directory; writing a config
+    // requires WRITE on its containing directory.
+    repeated ConfigAcl acls = 6;
 }
 
 message ListRequest {
@@ -53,6 +67,9 @@ message ListResponse {
 
 message GetConfigRequest {
     string id = 1;
+    // Optional config_content id to fetch (as surfaced by Config.current_content_id).
+    // When unset, the config's current (latest) content is returned.
+    optional string version = 2;
 }
 
 message GetConfigResponse {
@@ -75,9 +92,56 @@ message DeleteConfigResponse {
 
 }
 
+// CreateDirectoryRequest creates a directory at directory.path/directory.name.
+// Missing ancestor directories are created too, each carrying the supplied acls.
+// directory.id, directory.directories and directory.configs are ignored.
+message CreateDirectoryRequest {
+    Directory directory = 1;
+}
+
+message CreateDirectoryResponse {
+    Directory directory = 1;
+}
+
+// GetDirectoryRequest reads a single directory (its metadata and acls) by id.
+// The response directory is not populated with child directories or configs;
+// use List for that.
+message GetDirectoryRequest {
+    string id = 1;
+}
+
+message GetDirectoryResponse {
+    Directory directory = 1;
+}
+
+// UpdateDirectoryRequest replaces the acls of the directory identified by
+// directory.id. A directory's name and path are immutable; if supplied they must
+// match the stored values.
+message UpdateDirectoryRequest {
+    Directory directory = 1;
+}
+
+message UpdateDirectoryResponse {
+    Directory directory = 1;
+}
+
+// DeleteDirectoryRequest removes an empty directory by id. Deleting a directory
+// that still contains configs or subdirectories is rejected.
+message DeleteDirectoryRequest {
+    string id = 1;
+}
+
+message DeleteDirectoryResponse {
+
+}
+
 service ConfigFSServer {
   rpc List (ListRequest) returns (ListResponse) {}
   rpc GetConfig (GetConfigRequest) returns (GetConfigResponse) {}
   rpc SetConfig (SetConfigRequest) returns (SetConfigResponse) {}
   rpc DeleteConfig (DeleteConfigRequest) returns (DeleteConfigResponse) {}
+  rpc CreateDirectory (CreateDirectoryRequest) returns (CreateDirectoryResponse) {}
+  rpc GetDirectory (GetDirectoryRequest) returns (GetDirectoryResponse) {}
+  rpc UpdateDirectory (UpdateDirectoryRequest) returns (UpdateDirectoryResponse) {}
+  rpc DeleteDirectory (DeleteDirectoryRequest) returns (DeleteDirectoryResponse) {}
 }

@@ -82,3 +82,44 @@ func (c *Config) Allows(tags []string, required Acl) bool {
 func (c *Config) VisibileTo(tags []string) bool {
 	return c.Allows(tags, Acl_READ)
 }
+
+// Allows reports whether a caller carrying the supplied tags is granted the
+// required access level on this directory.
+//
+// Unlike a Config, a directory is an OPTIONAL path gate: a directory with no ACL
+// entries imposes no restriction (it is transparent and grants every level), so
+// directories materialised implicitly — or created before directory ACLs existed
+// — never lock out the configs beneath them, and the synthesised tree root (which
+// has no row and therefore no ACL) is always traversable. A directory that does
+// carry entries is enforced exactly like a Config: access is granted only if some
+// entry matches (deny-by-default among the entries present). The same entry
+// matching and WRITE-implies-READ rules apply.
+//
+// It is nil-safe: a nil receiver (e.g. the synthesised root) grants every level.
+func (d *Directory) Allows(tags []string, required Acl) bool {
+	acls := d.GetAcls()
+	if len(acls) == 0 {
+		return true
+	}
+	for _, acl := range acls {
+		if !aclGrants(acl.GetAcl(), required) {
+			continue
+		}
+		if acl.GetEveryone() {
+			return true
+		}
+		for _, providedTag := range tags {
+			if acl.GetTag() != "" && acl.GetTag() == providedTag {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// VisibileTo reports whether the caller may traverse/read this directory. It is
+// the READ-level alias of Allows, matching Config.VisibileTo (including the
+// canonical misspelling).
+func (d *Directory) VisibileTo(tags []string) bool {
+	return d.Allows(tags, Acl_READ)
+}

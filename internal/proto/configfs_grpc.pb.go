@@ -19,10 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ConfigFSServer_List_FullMethodName         = "/configfs.ConfigFSServer/List"
-	ConfigFSServer_GetConfig_FullMethodName    = "/configfs.ConfigFSServer/GetConfig"
-	ConfigFSServer_SetConfig_FullMethodName    = "/configfs.ConfigFSServer/SetConfig"
-	ConfigFSServer_DeleteConfig_FullMethodName = "/configfs.ConfigFSServer/DeleteConfig"
+	ConfigFSServer_List_FullMethodName            = "/configfs.ConfigFSServer/List"
+	ConfigFSServer_GetConfig_FullMethodName       = "/configfs.ConfigFSServer/GetConfig"
+	ConfigFSServer_SetConfig_FullMethodName       = "/configfs.ConfigFSServer/SetConfig"
+	ConfigFSServer_DeleteConfig_FullMethodName    = "/configfs.ConfigFSServer/DeleteConfig"
+	ConfigFSServer_CreateDirectory_FullMethodName = "/configfs.ConfigFSServer/CreateDirectory"
+	ConfigFSServer_GetDirectory_FullMethodName    = "/configfs.ConfigFSServer/GetDirectory"
+	ConfigFSServer_UpdateDirectory_FullMethodName = "/configfs.ConfigFSServer/UpdateDirectory"
+	ConfigFSServer_DeleteDirectory_FullMethodName = "/configfs.ConfigFSServer/DeleteDirectory"
 )
 
 // ConfigFSServerClient is the client API for ConfigFSServer service.
@@ -33,6 +37,10 @@ type ConfigFSServerClient interface {
 	GetConfig(ctx context.Context, in *GetConfigRequest, opts ...grpc.CallOption) (*GetConfigResponse, error)
 	SetConfig(ctx context.Context, in *SetConfigRequest, opts ...grpc.CallOption) (*SetConfigResponse, error)
 	DeleteConfig(ctx context.Context, in *DeleteConfigRequest, opts ...grpc.CallOption) (*DeleteConfigResponse, error)
+	CreateDirectory(ctx context.Context, in *CreateDirectoryRequest, opts ...grpc.CallOption) (*CreateDirectoryResponse, error)
+	GetDirectory(ctx context.Context, in *GetDirectoryRequest, opts ...grpc.CallOption) (*GetDirectoryResponse, error)
+	UpdateDirectory(ctx context.Context, in *UpdateDirectoryRequest, opts ...grpc.CallOption) (*UpdateDirectoryResponse, error)
+	DeleteDirectory(ctx context.Context, in *DeleteDirectoryRequest, opts ...grpc.CallOption) (*DeleteDirectoryResponse, error)
 }
 
 type configFSServerClient struct {
@@ -83,6 +91,46 @@ func (c *configFSServerClient) DeleteConfig(ctx context.Context, in *DeleteConfi
 	return out, nil
 }
 
+func (c *configFSServerClient) CreateDirectory(ctx context.Context, in *CreateDirectoryRequest, opts ...grpc.CallOption) (*CreateDirectoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateDirectoryResponse)
+	err := c.cc.Invoke(ctx, ConfigFSServer_CreateDirectory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configFSServerClient) GetDirectory(ctx context.Context, in *GetDirectoryRequest, opts ...grpc.CallOption) (*GetDirectoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetDirectoryResponse)
+	err := c.cc.Invoke(ctx, ConfigFSServer_GetDirectory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configFSServerClient) UpdateDirectory(ctx context.Context, in *UpdateDirectoryRequest, opts ...grpc.CallOption) (*UpdateDirectoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateDirectoryResponse)
+	err := c.cc.Invoke(ctx, ConfigFSServer_UpdateDirectory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configFSServerClient) DeleteDirectory(ctx context.Context, in *DeleteDirectoryRequest, opts ...grpc.CallOption) (*DeleteDirectoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteDirectoryResponse)
+	err := c.cc.Invoke(ctx, ConfigFSServer_DeleteDirectory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ConfigFSServerServer is the server API for ConfigFSServer service.
 // All implementations must embed UnimplementedConfigFSServerServer
 // for forward compatibility.
@@ -91,6 +139,10 @@ type ConfigFSServerServer interface {
 	GetConfig(context.Context, *GetConfigRequest) (*GetConfigResponse, error)
 	SetConfig(context.Context, *SetConfigRequest) (*SetConfigResponse, error)
 	DeleteConfig(context.Context, *DeleteConfigRequest) (*DeleteConfigResponse, error)
+	CreateDirectory(context.Context, *CreateDirectoryRequest) (*CreateDirectoryResponse, error)
+	GetDirectory(context.Context, *GetDirectoryRequest) (*GetDirectoryResponse, error)
+	UpdateDirectory(context.Context, *UpdateDirectoryRequest) (*UpdateDirectoryResponse, error)
+	DeleteDirectory(context.Context, *DeleteDirectoryRequest) (*DeleteDirectoryResponse, error)
 	mustEmbedUnimplementedConfigFSServerServer()
 }
 
@@ -112,6 +164,18 @@ func (UnimplementedConfigFSServerServer) SetConfig(context.Context, *SetConfigRe
 }
 func (UnimplementedConfigFSServerServer) DeleteConfig(context.Context, *DeleteConfigRequest) (*DeleteConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteConfig not implemented")
+}
+func (UnimplementedConfigFSServerServer) CreateDirectory(context.Context, *CreateDirectoryRequest) (*CreateDirectoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateDirectory not implemented")
+}
+func (UnimplementedConfigFSServerServer) GetDirectory(context.Context, *GetDirectoryRequest) (*GetDirectoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetDirectory not implemented")
+}
+func (UnimplementedConfigFSServerServer) UpdateDirectory(context.Context, *UpdateDirectoryRequest) (*UpdateDirectoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateDirectory not implemented")
+}
+func (UnimplementedConfigFSServerServer) DeleteDirectory(context.Context, *DeleteDirectoryRequest) (*DeleteDirectoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteDirectory not implemented")
 }
 func (UnimplementedConfigFSServerServer) mustEmbedUnimplementedConfigFSServerServer() {}
 func (UnimplementedConfigFSServerServer) testEmbeddedByValue()                        {}
@@ -206,6 +270,78 @@ func _ConfigFSServer_DeleteConfig_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConfigFSServer_CreateDirectory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateDirectoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigFSServerServer).CreateDirectory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigFSServer_CreateDirectory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigFSServerServer).CreateDirectory(ctx, req.(*CreateDirectoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigFSServer_GetDirectory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDirectoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigFSServerServer).GetDirectory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigFSServer_GetDirectory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigFSServerServer).GetDirectory(ctx, req.(*GetDirectoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigFSServer_UpdateDirectory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateDirectoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigFSServerServer).UpdateDirectory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigFSServer_UpdateDirectory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigFSServerServer).UpdateDirectory(ctx, req.(*UpdateDirectoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigFSServer_DeleteDirectory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteDirectoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigFSServerServer).DeleteDirectory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigFSServer_DeleteDirectory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigFSServerServer).DeleteDirectory(ctx, req.(*DeleteDirectoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ConfigFSServer_ServiceDesc is the grpc.ServiceDesc for ConfigFSServer service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -228,6 +364,22 @@ var ConfigFSServer_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteConfig",
 			Handler:    _ConfigFSServer_DeleteConfig_Handler,
+		},
+		{
+			MethodName: "CreateDirectory",
+			Handler:    _ConfigFSServer_CreateDirectory_Handler,
+		},
+		{
+			MethodName: "GetDirectory",
+			Handler:    _ConfigFSServer_GetDirectory_Handler,
+		},
+		{
+			MethodName: "UpdateDirectory",
+			Handler:    _ConfigFSServer_UpdateDirectory_Handler,
+		},
+		{
+			MethodName: "DeleteDirectory",
+			Handler:    _ConfigFSServer_DeleteDirectory_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

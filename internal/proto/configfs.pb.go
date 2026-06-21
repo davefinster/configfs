@@ -148,10 +148,16 @@ type Config struct {
 	// Server-maintained: stamped on creation and on every successful update.
 	// Values supplied by clients on SetConfig are ignored. Unset on configs
 	// stored before timestamps were tracked.
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// ID of the config_content row currently referenced by this config (its
+	// latest version). Server-maintained: each SetConfig that changes the
+	// content writes a new config_content row and repoints this. Pass it (or any
+	// prior value the client has retained) as GetConfigRequest.version to fetch a
+	// specific version. Empty on configs that predate content versioning.
+	CurrentContentId string `protobuf:"bytes,9,opt,name=current_content_id,json=currentContentId,proto3" json:"current_content_id,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Config) Reset() {
@@ -240,13 +246,28 @@ func (x *Config) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Config) GetCurrentContentId() string {
+	if x != nil {
+		return x.CurrentContentId
+	}
+	return ""
+}
+
 type Directory struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Path          string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
-	Directories   []*Directory           `protobuf:"bytes,4,rep,name=directories,proto3" json:"directories,omitempty"`
-	Configs       []*Config              `protobuf:"bytes,5,rep,name=configs,proto3" json:"configs,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name        string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Path        string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
+	Directories []*Directory           `protobuf:"bytes,4,rep,name=directories,proto3" json:"directories,omitempty"`
+	Configs     []*Config              `protobuf:"bytes,5,rep,name=configs,proto3" json:"configs,omitempty"`
+	// A directory's ACL is an optional path gate. A directory with no entries
+	// imposes no restriction (it is transparent, so directories created
+	// implicitly or before directory ACLs existed never lock out the configs
+	// beneath them); a directory that does carry entries is enforced like a
+	// Config (deny-by-default among the entries present). Reading a config or
+	// listing requires READ on every ancestor directory; writing a config
+	// requires WRITE on its containing directory.
+	Acls          []*ConfigAcl `protobuf:"bytes,6,rep,name=acls,proto3" json:"acls,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -312,6 +333,13 @@ func (x *Directory) GetDirectories() []*Directory {
 func (x *Directory) GetConfigs() []*Config {
 	if x != nil {
 		return x.Configs
+	}
+	return nil
+}
+
+func (x *Directory) GetAcls() []*ConfigAcl {
+	if x != nil {
+		return x.Acls
 	}
 	return nil
 }
@@ -405,8 +433,11 @@ func (x *ListResponse) GetTop() *Directory {
 }
 
 type GetConfigRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Optional config_content id to fetch (as surfaced by Config.current_content_id).
+	// When unset, the config's current (latest) content is returned.
+	Version       *string `protobuf:"bytes,2,opt,name=version,proto3,oneof" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -444,6 +475,13 @@ func (*GetConfigRequest) Descriptor() ([]byte, []int) {
 func (x *GetConfigRequest) GetId() string {
 	if x != nil {
 		return x.Id
+	}
+	return ""
+}
+
+func (x *GetConfigRequest) GetVersion() string {
+	if x != nil && x.Version != nil {
+		return *x.Version
 	}
 	return ""
 }
@@ -660,6 +698,361 @@ func (*DeleteConfigResponse) Descriptor() ([]byte, []int) {
 	return file_configfs_proto_rawDescGZIP(), []int{10}
 }
 
+// CreateDirectoryRequest creates a directory at directory.path/directory.name.
+// Missing ancestor directories are created too, each carrying the supplied acls.
+// directory.id, directory.directories and directory.configs are ignored.
+type CreateDirectoryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Directory     *Directory             `protobuf:"bytes,1,opt,name=directory,proto3" json:"directory,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateDirectoryRequest) Reset() {
+	*x = CreateDirectoryRequest{}
+	mi := &file_configfs_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateDirectoryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateDirectoryRequest) ProtoMessage() {}
+
+func (x *CreateDirectoryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_configfs_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateDirectoryRequest.ProtoReflect.Descriptor instead.
+func (*CreateDirectoryRequest) Descriptor() ([]byte, []int) {
+	return file_configfs_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *CreateDirectoryRequest) GetDirectory() *Directory {
+	if x != nil {
+		return x.Directory
+	}
+	return nil
+}
+
+type CreateDirectoryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Directory     *Directory             `protobuf:"bytes,1,opt,name=directory,proto3" json:"directory,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateDirectoryResponse) Reset() {
+	*x = CreateDirectoryResponse{}
+	mi := &file_configfs_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateDirectoryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateDirectoryResponse) ProtoMessage() {}
+
+func (x *CreateDirectoryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_configfs_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateDirectoryResponse.ProtoReflect.Descriptor instead.
+func (*CreateDirectoryResponse) Descriptor() ([]byte, []int) {
+	return file_configfs_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *CreateDirectoryResponse) GetDirectory() *Directory {
+	if x != nil {
+		return x.Directory
+	}
+	return nil
+}
+
+// GetDirectoryRequest reads a single directory (its metadata and acls) by id.
+// The response directory is not populated with child directories or configs;
+// use List for that.
+type GetDirectoryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDirectoryRequest) Reset() {
+	*x = GetDirectoryRequest{}
+	mi := &file_configfs_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDirectoryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDirectoryRequest) ProtoMessage() {}
+
+func (x *GetDirectoryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_configfs_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDirectoryRequest.ProtoReflect.Descriptor instead.
+func (*GetDirectoryRequest) Descriptor() ([]byte, []int) {
+	return file_configfs_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *GetDirectoryRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type GetDirectoryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Directory     *Directory             `protobuf:"bytes,1,opt,name=directory,proto3" json:"directory,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDirectoryResponse) Reset() {
+	*x = GetDirectoryResponse{}
+	mi := &file_configfs_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDirectoryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDirectoryResponse) ProtoMessage() {}
+
+func (x *GetDirectoryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_configfs_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDirectoryResponse.ProtoReflect.Descriptor instead.
+func (*GetDirectoryResponse) Descriptor() ([]byte, []int) {
+	return file_configfs_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *GetDirectoryResponse) GetDirectory() *Directory {
+	if x != nil {
+		return x.Directory
+	}
+	return nil
+}
+
+// UpdateDirectoryRequest replaces the acls of the directory identified by
+// directory.id. A directory's name and path are immutable; if supplied they must
+// match the stored values.
+type UpdateDirectoryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Directory     *Directory             `protobuf:"bytes,1,opt,name=directory,proto3" json:"directory,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateDirectoryRequest) Reset() {
+	*x = UpdateDirectoryRequest{}
+	mi := &file_configfs_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateDirectoryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateDirectoryRequest) ProtoMessage() {}
+
+func (x *UpdateDirectoryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_configfs_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateDirectoryRequest.ProtoReflect.Descriptor instead.
+func (*UpdateDirectoryRequest) Descriptor() ([]byte, []int) {
+	return file_configfs_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *UpdateDirectoryRequest) GetDirectory() *Directory {
+	if x != nil {
+		return x.Directory
+	}
+	return nil
+}
+
+type UpdateDirectoryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Directory     *Directory             `protobuf:"bytes,1,opt,name=directory,proto3" json:"directory,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateDirectoryResponse) Reset() {
+	*x = UpdateDirectoryResponse{}
+	mi := &file_configfs_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateDirectoryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateDirectoryResponse) ProtoMessage() {}
+
+func (x *UpdateDirectoryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_configfs_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateDirectoryResponse.ProtoReflect.Descriptor instead.
+func (*UpdateDirectoryResponse) Descriptor() ([]byte, []int) {
+	return file_configfs_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *UpdateDirectoryResponse) GetDirectory() *Directory {
+	if x != nil {
+		return x.Directory
+	}
+	return nil
+}
+
+// DeleteDirectoryRequest removes an empty directory by id. Deleting a directory
+// that still contains configs or subdirectories is rejected.
+type DeleteDirectoryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteDirectoryRequest) Reset() {
+	*x = DeleteDirectoryRequest{}
+	mi := &file_configfs_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteDirectoryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteDirectoryRequest) ProtoMessage() {}
+
+func (x *DeleteDirectoryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_configfs_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteDirectoryRequest.ProtoReflect.Descriptor instead.
+func (*DeleteDirectoryRequest) Descriptor() ([]byte, []int) {
+	return file_configfs_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *DeleteDirectoryRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type DeleteDirectoryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteDirectoryResponse) Reset() {
+	*x = DeleteDirectoryResponse{}
+	mi := &file_configfs_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteDirectoryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteDirectoryResponse) ProtoMessage() {}
+
+func (x *DeleteDirectoryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_configfs_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteDirectoryResponse.ProtoReflect.Descriptor instead.
+func (*DeleteDirectoryResponse) Descriptor() ([]byte, []int) {
+	return file_configfs_proto_rawDescGZIP(), []int{18}
+}
+
 var File_configfs_proto protoreflect.FileDescriptor
 
 const file_configfs_proto_rawDesc = "" +
@@ -668,7 +1061,7 @@ const file_configfs_proto_rawDesc = "" +
 	"\tConfigAcl\x12\x1f\n" +
 	"\x03acl\x18\x01 \x01(\x0e2\r.configfs.AclR\x03acl\x12\x10\n" +
 	"\x03tag\x18\x02 \x01(\tR\x03tag\x12\x1a\n" +
-	"\beveryone\x18\x03 \x01(\bR\beveryone\"\xad\x02\n" +
+	"\beveryone\x18\x03 \x01(\bR\beveryone\"\xdb\x02\n" +
 	"\x06Config\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
@@ -679,22 +1072,27 @@ const file_configfs_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAtB\n" +
+	"updated_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12,\n" +
+	"\x12current_content_id\x18\t \x01(\tR\x10currentContentIdB\n" +
 	"\n" +
-	"\b_content\"\xa6\x01\n" +
+	"\b_content\"\xcf\x01\n" +
 	"\tDirectory\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x03 \x01(\tR\x04path\x125\n" +
 	"\vdirectories\x18\x04 \x03(\v2\x13.configfs.DirectoryR\vdirectories\x12*\n" +
-	"\aconfigs\x18\x05 \x03(\v2\x10.configfs.ConfigR\aconfigs\"F\n" +
+	"\aconfigs\x18\x05 \x03(\v2\x10.configfs.ConfigR\aconfigs\x12'\n" +
+	"\x04acls\x18\x06 \x03(\v2\x13.configfs.ConfigAclR\x04acls\"F\n" +
 	"\vListRequest\x12&\n" +
 	"\fdirectory_id\x18\x01 \x01(\tH\x00R\vdirectoryId\x88\x01\x01B\x0f\n" +
 	"\r_directory_id\"5\n" +
 	"\fListResponse\x12%\n" +
-	"\x03top\x18\x01 \x01(\v2\x13.configfs.DirectoryR\x03top\"\"\n" +
+	"\x03top\x18\x01 \x01(\v2\x13.configfs.DirectoryR\x03top\"M\n" +
 	"\x10GetConfigRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"=\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\aversion\x18\x02 \x01(\tH\x00R\aversion\x88\x01\x01B\n" +
+	"\n" +
+	"\b_version\"=\n" +
 	"\x11GetConfigResponse\x12(\n" +
 	"\x06config\x18\x01 \x01(\v2\x10.configfs.ConfigR\x06config\"<\n" +
 	"\x10SetConfigRequest\x12(\n" +
@@ -703,16 +1101,35 @@ const file_configfs_proto_rawDesc = "" +
 	"\x06config\x18\x01 \x01(\v2\x10.configfs.ConfigR\x06config\"%\n" +
 	"\x13DeleteConfigRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x16\n" +
-	"\x14DeleteConfigResponse*+\n" +
+	"\x14DeleteConfigResponse\"K\n" +
+	"\x16CreateDirectoryRequest\x121\n" +
+	"\tdirectory\x18\x01 \x01(\v2\x13.configfs.DirectoryR\tdirectory\"L\n" +
+	"\x17CreateDirectoryResponse\x121\n" +
+	"\tdirectory\x18\x01 \x01(\v2\x13.configfs.DirectoryR\tdirectory\"%\n" +
+	"\x13GetDirectoryRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"I\n" +
+	"\x14GetDirectoryResponse\x121\n" +
+	"\tdirectory\x18\x01 \x01(\v2\x13.configfs.DirectoryR\tdirectory\"K\n" +
+	"\x16UpdateDirectoryRequest\x121\n" +
+	"\tdirectory\x18\x01 \x01(\v2\x13.configfs.DirectoryR\tdirectory\"L\n" +
+	"\x17UpdateDirectoryResponse\x121\n" +
+	"\tdirectory\x18\x01 \x01(\v2\x13.configfs.DirectoryR\tdirectory\"(\n" +
+	"\x16DeleteDirectoryRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x19\n" +
+	"\x17DeleteDirectoryResponse*+\n" +
 	"\x03Acl\x12\x0f\n" +
 	"\vUNKNOWN_ACL\x10\x00\x12\b\n" +
 	"\x04READ\x10\x01\x12\t\n" +
-	"\x05WRITE\x10\x022\xaa\x02\n" +
+	"\x05WRITE\x10\x022\x89\x05\n" +
 	"\x0eConfigFSServer\x127\n" +
 	"\x04List\x12\x15.configfs.ListRequest\x1a\x16.configfs.ListResponse\"\x00\x12F\n" +
 	"\tGetConfig\x12\x1a.configfs.GetConfigRequest\x1a\x1b.configfs.GetConfigResponse\"\x00\x12F\n" +
 	"\tSetConfig\x12\x1a.configfs.SetConfigRequest\x1a\x1b.configfs.SetConfigResponse\"\x00\x12O\n" +
-	"\fDeleteConfig\x12\x1d.configfs.DeleteConfigRequest\x1a\x1e.configfs.DeleteConfigResponse\"\x00B0Z.github.com/davefinster/configfs/internal/protob\x06proto3"
+	"\fDeleteConfig\x12\x1d.configfs.DeleteConfigRequest\x1a\x1e.configfs.DeleteConfigResponse\"\x00\x12X\n" +
+	"\x0fCreateDirectory\x12 .configfs.CreateDirectoryRequest\x1a!.configfs.CreateDirectoryResponse\"\x00\x12O\n" +
+	"\fGetDirectory\x12\x1d.configfs.GetDirectoryRequest\x1a\x1e.configfs.GetDirectoryResponse\"\x00\x12X\n" +
+	"\x0fUpdateDirectory\x12 .configfs.UpdateDirectoryRequest\x1a!.configfs.UpdateDirectoryResponse\"\x00\x12X\n" +
+	"\x0fDeleteDirectory\x12 .configfs.DeleteDirectoryRequest\x1a!.configfs.DeleteDirectoryResponse\"\x00B0Z.github.com/davefinster/configfs/internal/protob\x06proto3"
 
 var (
 	file_configfs_proto_rawDescOnce sync.Once
@@ -727,46 +1144,68 @@ func file_configfs_proto_rawDescGZIP() []byte {
 }
 
 var file_configfs_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_configfs_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_configfs_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_configfs_proto_goTypes = []any{
-	(Acl)(0),                      // 0: configfs.Acl
-	(*ConfigAcl)(nil),             // 1: configfs.ConfigAcl
-	(*Config)(nil),                // 2: configfs.Config
-	(*Directory)(nil),             // 3: configfs.Directory
-	(*ListRequest)(nil),           // 4: configfs.ListRequest
-	(*ListResponse)(nil),          // 5: configfs.ListResponse
-	(*GetConfigRequest)(nil),      // 6: configfs.GetConfigRequest
-	(*GetConfigResponse)(nil),     // 7: configfs.GetConfigResponse
-	(*SetConfigRequest)(nil),      // 8: configfs.SetConfigRequest
-	(*SetConfigResponse)(nil),     // 9: configfs.SetConfigResponse
-	(*DeleteConfigRequest)(nil),   // 10: configfs.DeleteConfigRequest
-	(*DeleteConfigResponse)(nil),  // 11: configfs.DeleteConfigResponse
-	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
+	(Acl)(0),                        // 0: configfs.Acl
+	(*ConfigAcl)(nil),               // 1: configfs.ConfigAcl
+	(*Config)(nil),                  // 2: configfs.Config
+	(*Directory)(nil),               // 3: configfs.Directory
+	(*ListRequest)(nil),             // 4: configfs.ListRequest
+	(*ListResponse)(nil),            // 5: configfs.ListResponse
+	(*GetConfigRequest)(nil),        // 6: configfs.GetConfigRequest
+	(*GetConfigResponse)(nil),       // 7: configfs.GetConfigResponse
+	(*SetConfigRequest)(nil),        // 8: configfs.SetConfigRequest
+	(*SetConfigResponse)(nil),       // 9: configfs.SetConfigResponse
+	(*DeleteConfigRequest)(nil),     // 10: configfs.DeleteConfigRequest
+	(*DeleteConfigResponse)(nil),    // 11: configfs.DeleteConfigResponse
+	(*CreateDirectoryRequest)(nil),  // 12: configfs.CreateDirectoryRequest
+	(*CreateDirectoryResponse)(nil), // 13: configfs.CreateDirectoryResponse
+	(*GetDirectoryRequest)(nil),     // 14: configfs.GetDirectoryRequest
+	(*GetDirectoryResponse)(nil),    // 15: configfs.GetDirectoryResponse
+	(*UpdateDirectoryRequest)(nil),  // 16: configfs.UpdateDirectoryRequest
+	(*UpdateDirectoryResponse)(nil), // 17: configfs.UpdateDirectoryResponse
+	(*DeleteDirectoryRequest)(nil),  // 18: configfs.DeleteDirectoryRequest
+	(*DeleteDirectoryResponse)(nil), // 19: configfs.DeleteDirectoryResponse
+	(*timestamppb.Timestamp)(nil),   // 20: google.protobuf.Timestamp
 }
 var file_configfs_proto_depIdxs = []int32{
 	0,  // 0: configfs.ConfigAcl.acl:type_name -> configfs.Acl
 	1,  // 1: configfs.Config.acls:type_name -> configfs.ConfigAcl
-	12, // 2: configfs.Config.created_at:type_name -> google.protobuf.Timestamp
-	12, // 3: configfs.Config.updated_at:type_name -> google.protobuf.Timestamp
+	20, // 2: configfs.Config.created_at:type_name -> google.protobuf.Timestamp
+	20, // 3: configfs.Config.updated_at:type_name -> google.protobuf.Timestamp
 	3,  // 4: configfs.Directory.directories:type_name -> configfs.Directory
 	2,  // 5: configfs.Directory.configs:type_name -> configfs.Config
-	3,  // 6: configfs.ListResponse.top:type_name -> configfs.Directory
-	2,  // 7: configfs.GetConfigResponse.config:type_name -> configfs.Config
-	2,  // 8: configfs.SetConfigRequest.config:type_name -> configfs.Config
-	2,  // 9: configfs.SetConfigResponse.config:type_name -> configfs.Config
-	4,  // 10: configfs.ConfigFSServer.List:input_type -> configfs.ListRequest
-	6,  // 11: configfs.ConfigFSServer.GetConfig:input_type -> configfs.GetConfigRequest
-	8,  // 12: configfs.ConfigFSServer.SetConfig:input_type -> configfs.SetConfigRequest
-	10, // 13: configfs.ConfigFSServer.DeleteConfig:input_type -> configfs.DeleteConfigRequest
-	5,  // 14: configfs.ConfigFSServer.List:output_type -> configfs.ListResponse
-	7,  // 15: configfs.ConfigFSServer.GetConfig:output_type -> configfs.GetConfigResponse
-	9,  // 16: configfs.ConfigFSServer.SetConfig:output_type -> configfs.SetConfigResponse
-	11, // 17: configfs.ConfigFSServer.DeleteConfig:output_type -> configfs.DeleteConfigResponse
-	14, // [14:18] is the sub-list for method output_type
-	10, // [10:14] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	1,  // 6: configfs.Directory.acls:type_name -> configfs.ConfigAcl
+	3,  // 7: configfs.ListResponse.top:type_name -> configfs.Directory
+	2,  // 8: configfs.GetConfigResponse.config:type_name -> configfs.Config
+	2,  // 9: configfs.SetConfigRequest.config:type_name -> configfs.Config
+	2,  // 10: configfs.SetConfigResponse.config:type_name -> configfs.Config
+	3,  // 11: configfs.CreateDirectoryRequest.directory:type_name -> configfs.Directory
+	3,  // 12: configfs.CreateDirectoryResponse.directory:type_name -> configfs.Directory
+	3,  // 13: configfs.GetDirectoryResponse.directory:type_name -> configfs.Directory
+	3,  // 14: configfs.UpdateDirectoryRequest.directory:type_name -> configfs.Directory
+	3,  // 15: configfs.UpdateDirectoryResponse.directory:type_name -> configfs.Directory
+	4,  // 16: configfs.ConfigFSServer.List:input_type -> configfs.ListRequest
+	6,  // 17: configfs.ConfigFSServer.GetConfig:input_type -> configfs.GetConfigRequest
+	8,  // 18: configfs.ConfigFSServer.SetConfig:input_type -> configfs.SetConfigRequest
+	10, // 19: configfs.ConfigFSServer.DeleteConfig:input_type -> configfs.DeleteConfigRequest
+	12, // 20: configfs.ConfigFSServer.CreateDirectory:input_type -> configfs.CreateDirectoryRequest
+	14, // 21: configfs.ConfigFSServer.GetDirectory:input_type -> configfs.GetDirectoryRequest
+	16, // 22: configfs.ConfigFSServer.UpdateDirectory:input_type -> configfs.UpdateDirectoryRequest
+	18, // 23: configfs.ConfigFSServer.DeleteDirectory:input_type -> configfs.DeleteDirectoryRequest
+	5,  // 24: configfs.ConfigFSServer.List:output_type -> configfs.ListResponse
+	7,  // 25: configfs.ConfigFSServer.GetConfig:output_type -> configfs.GetConfigResponse
+	9,  // 26: configfs.ConfigFSServer.SetConfig:output_type -> configfs.SetConfigResponse
+	11, // 27: configfs.ConfigFSServer.DeleteConfig:output_type -> configfs.DeleteConfigResponse
+	13, // 28: configfs.ConfigFSServer.CreateDirectory:output_type -> configfs.CreateDirectoryResponse
+	15, // 29: configfs.ConfigFSServer.GetDirectory:output_type -> configfs.GetDirectoryResponse
+	17, // 30: configfs.ConfigFSServer.UpdateDirectory:output_type -> configfs.UpdateDirectoryResponse
+	19, // 31: configfs.ConfigFSServer.DeleteDirectory:output_type -> configfs.DeleteDirectoryResponse
+	24, // [24:32] is the sub-list for method output_type
+	16, // [16:24] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_configfs_proto_init() }
@@ -776,13 +1215,14 @@ func file_configfs_proto_init() {
 	}
 	file_configfs_proto_msgTypes[1].OneofWrappers = []any{}
 	file_configfs_proto_msgTypes[3].OneofWrappers = []any{}
+	file_configfs_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_configfs_proto_rawDesc), len(file_configfs_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   11,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

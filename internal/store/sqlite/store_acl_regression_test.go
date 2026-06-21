@@ -14,6 +14,7 @@ import (
 func TestUpsertACLOnlyUpdatePreservesContent(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
+	mkdirAll(t, s, "/a")
 
 	saved, err := s.Upsert(ctx, &types.Config{
 		Name:        "cfg",
@@ -36,7 +37,7 @@ func TestUpsertACLOnlyUpdatePreservesContent(t *testing.T) {
 		t.Fatalf("acl-only Upsert: %v", err)
 	}
 
-	got, err := s.GetConfigByID(ctx, saved.GetId(), true)
+	got, err := s.GetConfigByID(ctx, saved.GetId(), true, "")
 	if err != nil {
 		t.Fatalf("GetConfigByID: %v", err)
 	}
@@ -57,6 +58,7 @@ func TestUpsertACLOnlyUpdatePreservesContent(t *testing.T) {
 func TestGetConfigByIDDenyByDefault(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
+	mkdirAll(t, s, "/a")
 
 	saved, err := s.Upsert(ctx, &types.Config{
 		Name: "cfg", Path: "/a", Acls: nil, ContentSize: 1, Content: []byte("z"),
@@ -64,7 +66,7 @@ func TestGetConfigByIDDenyByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	got, err := s.GetConfigByID(ctx, saved.GetId(), false)
+	got, err := s.GetConfigByID(ctx, saved.GetId(), false, "")
 	if err != nil {
 		t.Fatalf("GetConfigByID: %v", err)
 	}
@@ -90,6 +92,7 @@ func TestGetConfigByIDDenyByDefault(t *testing.T) {
 func TestInsertConfigACLsSkipsUnknown(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
+	mkdirAll(t, s, "/a")
 
 	saved, err := s.Upsert(ctx, &types.Config{
 		Name: "cfg", Path: "/a",
@@ -105,7 +108,7 @@ func TestInsertConfigACLsSkipsUnknown(t *testing.T) {
 	if n := aclRowCount(t, s, saved.GetId()); n != 1 {
 		t.Errorf("config_acl row count = %d, want 1 (UNKNOWN_ACL skipped)", n)
 	}
-	got, err := s.GetConfigByID(ctx, saved.GetId(), false)
+	got, err := s.GetConfigByID(ctx, saved.GetId(), false, "")
 	if err != nil {
 		t.Fatalf("GetConfigByID: %v", err)
 	}
@@ -120,6 +123,7 @@ func TestInsertConfigACLsSkipsUnknown(t *testing.T) {
 func TestUnknownOnlyACLNotReadable(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
+	mkdirAll(t, s, "/a")
 
 	saved, err := s.Upsert(ctx, &types.Config{
 		Name: "cfg", Path: "/a",
@@ -132,7 +136,7 @@ func TestUnknownOnlyACLNotReadable(t *testing.T) {
 	if n := aclRowCount(t, s, saved.GetId()); n != 0 {
 		t.Errorf("config_acl row count = %d, want 0", n)
 	}
-	got, err := s.GetConfigByID(ctx, saved.GetId(), false)
+	got, err := s.GetConfigByID(ctx, saved.GetId(), false, "")
 	if err != nil {
 		t.Fatalf("GetConfigByID: %v", err)
 	}
@@ -148,6 +152,7 @@ func TestTreeForACLTagsRootLevelConfig(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 
+	mkdirAll(t, s, "/x")
 	everyoneRead := []*types.ConfigAcl{{Acl: types.Acl_READ, Everyone: true}}
 	mk := func(name, path string) {
 		t.Helper()

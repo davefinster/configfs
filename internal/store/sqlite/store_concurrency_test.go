@@ -19,6 +19,7 @@ import (
 func TestConcurrentUpsertsDoNotLock(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
+	mkdirAll(t, s, "/shared")
 
 	// Seed a config that half the workers repeatedly update, giving maximum
 	// write-write contention on a single row.
@@ -37,6 +38,15 @@ func TestConcurrentUpsertsDoNotLock(t *testing.T) {
 		workers      = 16
 		opsPerWorker = 8
 	)
+
+	// Pre-create the per-worker directories: directories are no longer auto-created
+	// on the config write path, and creating them concurrently inside the workers
+	// would just be testing directory creation rather than config-write contention.
+	for w := 0; w < workers; w++ {
+		if w%2 != 0 {
+			mkdirAll(t, s, fmt.Sprintf("/workers/%d", w))
+		}
+	}
 
 	var wg sync.WaitGroup
 	errs := make(chan error, workers*opsPerWorker)
@@ -58,8 +68,8 @@ func TestConcurrentUpsertsDoNotLock(t *testing.T) {
 						Content:     content,
 					})
 				} else {
-					// Insert a distinct new config, exercising ensurePath + insert
-					// concurrently with the updates above.
+					// Insert a distinct new config into a pre-created directory,
+					// exercising insert concurrently with the updates above.
 					content := []byte("x")
 					_, err = s.Upsert(ctx, &types.Config{
 						Name:        fmt.Sprintf("cfg-%d-%d", w, op),

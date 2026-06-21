@@ -320,6 +320,50 @@ func (s *FilesystemSnapshot) Create(ctx context.Context, c *types.Config) (*type
 	return s.Config(created.Config.GetId()), nil
 }
 
+// Mkdir creates a directory named name under parentPath carrying the supplied
+// acls, refreshes the snapshot and returns the created directory.
+func (s *FilesystemSnapshot) Mkdir(ctx context.Context, parentPath, name string, acls []*types.ConfigAcl) (*types.Directory, error) {
+	created, err := s.client.CreateDirectory(ctx, &types.CreateDirectoryRequest{
+		Directory: &types.Directory{
+			Name: name,
+			Path: parentPath,
+			Acls: acls,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Refresh(ctx); err != nil {
+		return nil, err
+	}
+	return created.GetDirectory(), nil
+}
+
+// Rmdir removes the directory named name under parentPath. The target is located
+// by name within the cached parent so the server is addressed by id, sidestepping
+// the root-path joining quirk between Config.FullPath and Directory.FullPath. The
+// server rejects a non-empty directory, which surfaces here as an error.
+func (s *FilesystemSnapshot) Rmdir(ctx context.Context, parentPath, name string) error {
+	parent := s.Directory(parentPath)
+	if parent == nil {
+		return syscall.ENOENT
+	}
+	var target *types.Directory
+	for _, child := range parent.GetDirectories() {
+		if child.GetName() == name {
+			target = child
+			break
+		}
+	}
+	if target == nil {
+		return syscall.ENOENT
+	}
+	if _, err := s.client.DeleteDirectory(ctx, &types.DeleteDirectoryRequest{Id: target.GetId()}); err != nil {
+		return err
+	}
+	return s.Refresh(ctx)
+}
+
 func (s *FilesystemSnapshot) Write(ctx context.Context, c *types.Config, h func(context.Context, *types.Config) error) error {
 	full, err := s.FullConfig(ctx, c)
 	if err != nil {
@@ -429,7 +473,27 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 }
 
 func (d *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
+	// req.Dir distinguishes rmdir from unlink. Directories are removed by id (via
+	// the cached parent), configs by their full path as before.
+	if req.Dir {
+		return d.snapshot.Rmdir(ctx, d.path, req.Name)
+	}
 	return d.snapshot.Remove(ctx, fmt.Sprintf("%s/%s", d.path, req.Name))
+}
+
+func (d *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
+	// A new directory inherits its parent's ACLs by default, so it is reachable by
+	// the same identities; they can be retargeted out of band via UpdateDirectory.
+	// (A mkdir syscall carries no ACLs of its own to apply.)
+	var acls []*types.ConfigAcl
+	if parent := d.dir(); parent != nil {
+		acls = parent.GetAcls()
+	}
+	created, err := d.snapshot.Mkdir(ctx, d.path, req.Name, acls)
+	if err != nil {
+		return nil, err
+	}
+	return &Dir{snapshot: d.snapshot, opts: d.opts, path: created.FullPath(), access: d.access}, nil
 }
 
 func (d *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {

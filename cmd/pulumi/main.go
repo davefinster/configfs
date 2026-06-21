@@ -18,14 +18,21 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func main() {
-	provider, err := infer.NewProviderBuilder().
+// buildProvider assembles the configfs provider and its resources. It is shared
+// by main and the schema test so both register the exact same resource set.
+func buildProvider() (p.Provider, error) {
+	return infer.NewProviderBuilder().
 		WithConfig(infer.Config(&Config{})).
 		WithResources(
 			infer.Resource(ConfigResource{}),
+			infer.Resource(DirectoryResource{}),
 		).
 		WithNamespace("davefinster").
 		Build()
+}
+
+func main() {
+	provider, err := buildProvider()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s", err.Error())
 		os.Exit(1)
@@ -228,6 +235,149 @@ func (ConfigResource) WireDependencies(f infer.FieldSelector, args *ConfigArgs, 
 	f.OutputField(&state.ContentSize).DependsOn(f.InputField(&args.Content))
 }
 
+type DirectoryResource struct{}
+
+func (d *DirectoryResource) Annotate(a infer.Annotator) {
+	a.Describe(&d, "A directory in a ConfigFSServer instance: an ACL-bearing node in the FUSE tree that configs (and other directories) live under.")
+}
+
+type DirectoryArgs struct {
+	Name string      `pulumi:"name,optional"`
+	Path string      `pulumi:"path"`
+	Acls []ConfigAcl `pulumi:"acls,optional"`
+}
+
+func (a *DirectoryArgs) Annotate(an infer.Annotator) {
+	an.Describe(&a.Name, "Name of the directory (the leaf node in the FUSE tree). Defaults to the Pulumi resource name.")
+	an.Describe(&a.Path, "Parent directory this directory sits under, e.g. /foo/bar. Missing ancestor directories are created automatically, each inheriting these acls.")
+	an.Describe(&a.Acls, "Access control entries governing who may traverse this directory. An empty list leaves the directory transparent (it imposes no restriction); entries gate access like a config (deny by default).")
+}
+
+type DirectoryState struct {
+	Name string      `pulumi:"name"`
+	Path string      `pulumi:"path"`
+	Acls []ConfigAcl `pulumi:"acls"`
+}
+
+func (DirectoryResource) Check(ctx context.Context, req infer.CheckRequest) (infer.CheckResponse[DirectoryArgs], error) {
+	if _, ok := req.NewInputs.GetOk("name"); !ok {
+		req.NewInputs = req.NewInputs.Set("name", property.New(req.Name))
+	}
+	args, failures, err := infer.DefaultCheck[DirectoryArgs](ctx, req.NewInputs)
+	return infer.CheckResponse[DirectoryArgs]{Inputs: args, Failures: failures}, err
+}
+
+func (DirectoryResource) Create(ctx context.Context, req infer.CreateRequest[DirectoryArgs]) (infer.CreateResponse[DirectoryState], error) {
+	if err := validateACLs(req.Inputs.Acls); err != nil {
+		return infer.CreateResponse[DirectoryState]{}, err
+	}
+	state := directoryStateFromArgs(req.Inputs)
+	if req.DryRun {
+		return infer.CreateResponse[DirectoryState]{Output: state}, nil
+	}
+	client, err := configClient(ctx)
+	if err != nil {
+		return infer.CreateResponse[DirectoryState]{}, err
+	}
+	resp, err := client.CreateDirectory(ctx, &types.CreateDirectoryRequest{Directory: directoryFromArgs("", req.Inputs)})
+	if err != nil {
+		return infer.CreateResponse[DirectoryState]{}, fmt.Errorf("creating directory: %w", err)
+	}
+	return infer.CreateResponse[DirectoryState]{
+		ID:     resp.GetDirectory().GetId(),
+		Output: state,
+	}, nil
+}
+
+func (DirectoryResource) Read(ctx context.Context, req infer.ReadRequest[DirectoryArgs, DirectoryState]) (infer.ReadResponse[DirectoryArgs, DirectoryState], error) {
+	client, err := configClient(ctx)
+	if err != nil {
+		return infer.ReadResponse[DirectoryArgs, DirectoryState]{}, err
+	}
+	resp, err := client.GetDirectory(ctx, &types.GetDirectoryRequest{Id: req.ID})
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return infer.ReadResponse[DirectoryArgs, DirectoryState]{}, nil
+		}
+		return infer.ReadResponse[DirectoryArgs, DirectoryState]{}, fmt.Errorf("reading directory %q: %w", req.ID, err)
+	}
+	dir := resp.GetDirectory()
+	args := DirectoryArgs{
+		Name: dir.GetName(),
+		Path: dir.GetPath(),
+		Acls: aclsFromProto(dir.GetAcls()),
+	}
+	return infer.ReadResponse[DirectoryArgs, DirectoryState]{
+		ID:     req.ID,
+		Inputs: args,
+		State:  directoryStateFromArgs(args),
+	}, nil
+}
+
+func (DirectoryResource) Update(ctx context.Context, req infer.UpdateRequest[DirectoryArgs, DirectoryState]) (infer.UpdateResponse[DirectoryState], error) {
+	if err := validateACLs(req.Inputs.Acls); err != nil {
+		return infer.UpdateResponse[DirectoryState]{}, err
+	}
+	state := directoryStateFromArgs(req.Inputs)
+	if req.DryRun {
+		return infer.UpdateResponse[DirectoryState]{Output: state}, nil
+	}
+	client, err := configClient(ctx)
+	if err != nil {
+		return infer.UpdateResponse[DirectoryState]{}, err
+	}
+	// Only the acls are mutable; a name or path change forces a replacement (see
+	// Diff), so the values sent here always match the stored directory.
+	if _, err := client.UpdateDirectory(ctx, &types.UpdateDirectoryRequest{Directory: directoryFromArgs(req.ID, req.Inputs)}); err != nil {
+		return infer.UpdateResponse[DirectoryState]{}, fmt.Errorf("updating directory %q: %w", req.ID, err)
+	}
+	return infer.UpdateResponse[DirectoryState]{Output: state}, nil
+}
+
+func (DirectoryResource) Delete(ctx context.Context, req infer.DeleteRequest[DirectoryState]) (infer.DeleteResponse, error) {
+	client, err := configClient(ctx)
+	if err != nil {
+		return infer.DeleteResponse{}, err
+	}
+	// The server refuses to delete a non-empty directory; that surfaces here as an
+	// error. Wire configs/subdirectories to depend on this resource so Pulumi tears
+	// them down first.
+	if _, err := client.DeleteDirectory(ctx, &types.DeleteDirectoryRequest{Id: req.ID}); err != nil {
+		if status.Code(err) == codes.NotFound {
+			p.GetLogger(ctx).Warningf("directory %q already gone on the server", req.ID)
+			return infer.DeleteResponse{}, nil
+		}
+		return infer.DeleteResponse{}, fmt.Errorf("deleting directory %q: %w", req.ID, err)
+	}
+	return infer.DeleteResponse{}, nil
+}
+
+func (DirectoryResource) Diff(ctx context.Context, req infer.DiffRequest[DirectoryArgs, DirectoryState]) (infer.DiffResponse, error) {
+	diff := map[string]p.PropertyDiff{}
+	// Name and path are immutable on the server (UpdateDirectory only swaps acls),
+	// so changing either replaces the directory.
+	if req.Inputs.Name != req.State.Name {
+		diff["name"] = p.PropertyDiff{Kind: p.UpdateReplace}
+	}
+	if req.Inputs.Path != req.State.Path {
+		diff["path"] = p.PropertyDiff{Kind: p.UpdateReplace}
+	}
+	if !aclsEqual(req.Inputs.Acls, req.State.Acls) {
+		diff["acls"] = p.PropertyDiff{Kind: p.Update}
+	}
+	return infer.DiffResponse{
+		DeleteBeforeReplace: true,
+		HasChanges:          len(diff) > 0,
+		DetailedDiff:        diff,
+	}, nil
+}
+
+func (DirectoryResource) WireDependencies(f infer.FieldSelector, args *DirectoryArgs, state *DirectoryState) {
+	f.OutputField(&state.Name).DependsOn(f.InputField(&args.Name))
+	f.OutputField(&state.Path).DependsOn(f.InputField(&args.Path))
+	f.OutputField(&state.Acls).DependsOn(f.InputField(&args.Acls))
+}
+
 func configClient(ctx context.Context) (types.ConfigFSServerClient, error) {
 	c := infer.GetConfig[Config](ctx)
 	if c.client == nil {
@@ -254,6 +404,23 @@ func stateFromArgs(a ConfigArgs) ConfigState {
 		Content:     a.Content,
 		Acls:        a.Acls,
 		ContentSize: len(a.Content),
+	}
+}
+
+func directoryFromArgs(id string, a DirectoryArgs) *types.Directory {
+	return &types.Directory{
+		Id:   id,
+		Name: a.Name,
+		Path: a.Path,
+		Acls: aclsToProto(a.Acls),
+	}
+}
+
+func directoryStateFromArgs(a DirectoryArgs) DirectoryState {
+	return DirectoryState{
+		Name: a.Name,
+		Path: a.Path,
+		Acls: a.Acls,
 	}
 }
 
