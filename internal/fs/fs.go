@@ -124,6 +124,30 @@ func (s *RemoteConfigFS) AttemptUnmountIfNecessary(ctx context.Context) error {
 	return fmt.Errorf("no commands were successful in unmounting the existing fuse: %w", multierr.Combine(errors...))
 }
 
+// EnsureMountPoint makes sure the mount point directory exists, creating it
+// (along with any missing parent directories, like `mkdir -p`) when it does not.
+// It is a no-op when the path is already a directory. It is only invoked when
+// the caller opts in via the --create_mount_point flag; without that flag a
+// missing mount point is left to surface as a mount error.
+func (s *RemoteConfigFS) EnsureMountPoint(ctx context.Context) error {
+	info, err := os.Stat(s.mountPoint)
+	if err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("mount point %q already exists but is not a directory", s.mountPoint)
+		}
+		log.InfofCtx(ctx, "mount point %q already exists - nothing to create", s.mountPoint)
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("error checking whether mount point %q exists: %w", s.mountPoint, err)
+	}
+	log.InfofCtx(ctx, "mount point %q does not exist - creating it (mkdir -p)", s.mountPoint)
+	if err := os.MkdirAll(s.mountPoint, 0o755); err != nil {
+		return fmt.Errorf("error creating mount point %q: %w", s.mountPoint, err)
+	}
+	return nil
+}
+
 func (s *RemoteConfigFS) Mount() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

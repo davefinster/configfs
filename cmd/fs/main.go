@@ -27,6 +27,7 @@ var (
 	kernelNetworking      = flag.Bool("kernel_networking", false, "Whether the server should just listen on kernel networking.")
 	mountPoint            = flag.String("mount_point", "/mnt/fusetest", "")
 	readOnly              = flag.Bool("read_only", false, "Whether the FUSE mount should be read-only. When set, the kernel rejects writes, creates and deletes.")
+	createMountPoint      = flag.Bool("create_mount_point", false, "When set, create the mount point directory (and any missing parents, like mkdir -p) if it does not already exist before mounting.")
 	tailscaleDirectory    = flag.String("tailscale_directory", "", "Directory for storing Tailscale state")
 	tailscaleAuthKey      = flag.String("tailscale_authkey", "", "Authentication key to use with Tailscale")
 	tailscaleHostname     = flag.String("tailscale_hostname", "", "Hostname to use when registering with Tailscale")
@@ -135,6 +136,11 @@ func run() {
 	remoteFS := fs.NewRemoteConfigFS(grpcClient, *mountPoint, fsOpts)
 	if err := remoteFS.LoadSnapshot(ctx); err != nil {
 		log.FatalfCtx(ctx, "error doing initial root load: %s", err.Error())
+	}
+	if *createMountPoint {
+		if err := remoteFS.EnsureMountPoint(ctx); err != nil {
+			log.FatalfCtx(ctx, "error ensuring mount point exists: %s", err.Error())
+		}
 	}
 	if err := remoteFS.AttemptUnmountIfNecessary(ctx); err != nil {
 		log.ErrorfCtx(ctx, err, "error attempting to check for existing mounts - will attempt to mount anyway")
