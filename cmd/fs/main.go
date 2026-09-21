@@ -34,6 +34,7 @@ var (
 	tailscaleEphemeral    = flag.Bool("tailscale_ephemeral", true, "Whether the Tailscale node should be registered as ephemeral.")
 	tailscaleClientID     = flag.String("tailscale_client_id", "", "Client ID to use when authenticating with Tailscale")
 	tailscaleClientSecret = flag.String("tailscale_client_secret", "", "Client Secret to use when authenticating with Tailscale")
+	tailscaleTags         = flag.String("tailscale_tags", "", "Comma separated list of Tailscale tags. Required when joining with an OAuth client secret, which only mints keys for explicit tags.")
 	tailscaleSocketPath   = flag.String("tailscale_socket_path", "", "Path at which the Tailscale socket can be found for detecting local Tailscale status.")
 	additionalACLOnCreate = flag.String("additional_acl_on_create", "", "tag:name@ACL comma separated list of ACLs to apply to newly created files.")
 )
@@ -50,6 +51,11 @@ func run() {
 			Ephemeral:    *tailscaleEphemeral,
 			ClientID:     *tailscaleClientID,
 			ClientSecret: *tailscaleClientSecret,
+		}
+		for _, tag := range strings.Split(*tailscaleTags, ",") {
+			if cleanTag := strings.TrimSpace(tag); len(cleanTag) > 0 {
+				s.AdvertiseTags = append(s.AdvertiseTags, cleanTag)
+			}
 		}
 		state, err := s.Up(ctx)
 		if err != nil {
