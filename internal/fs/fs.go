@@ -28,6 +28,7 @@ type RemoteConfigFS struct {
 	snapshot                 *FilesystemSnapshot
 	root                     *Dir
 	backgroundRefreshStarted bool
+	refreshFailing           bool
 }
 
 type RemoteConfigFSOptions struct {
@@ -187,8 +188,23 @@ func (s *RemoteConfigFS) LoadSnapshot(ctx context.Context) error {
 		client: s.client,
 		opts:   s.opts,
 	}
-	s.snapshot.Refresh(ctx)
+	s.refresh(ctx)
 	return nil
+}
+
+// refresh reloads the tree, logging when loading starts to fail and when it
+// recovers rather than at every attempt. A failed load keeps the last tree
+// mounted -- at startup, an empty one -- which is otherwise indistinguishable
+// from a tree with nothing in it.
+func (s *RemoteConfigFS) refresh(ctx context.Context) {
+	err := s.snapshot.Refresh(ctx)
+	switch {
+	case err != nil && !s.refreshFailing:
+		log.ErrorfCtx(ctx, err, "unable to load the tree from the server; serving the last one loaded")
+	case err == nil && s.refreshFailing:
+		log.InfofCtx(ctx, "loaded the tree from the server again")
+	}
+	s.refreshFailing = err != nil
 }
 
 func (s *RemoteConfigFS) backgroundLoop(ctx context.Context) {
@@ -205,7 +221,7 @@ func (s *RemoteConfigFS) backgroundLoop(ctx context.Context) {
 			return
 		case <-time.After(s.opts.RefreshInterval):
 			if s.snapshot != nil {
-				s.snapshot.Refresh(ctx)
+				s.refresh(ctx)
 			}
 		}
 	}

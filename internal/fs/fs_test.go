@@ -2,6 +2,7 @@ package fs
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -316,4 +317,56 @@ func TestDirRemoveDispatch(t *testing.T) {
 			t.Errorf("unlink deleted config id %q, want 42", deletedConfig)
 		}
 	})
+}
+
+// fakeListClient satisfies types.ConfigFSServerClient with only List wired.
+type fakeListClient struct {
+	types.ConfigFSServerClient
+	list func() (*types.ListResponse, error)
+}
+
+func (f fakeListClient) List(_ context.Context, _ *types.ListRequest, _ ...grpc.CallOption) (*types.ListResponse, error) {
+	return f.list()
+}
+
+// TestRefreshKeepsLastTreeOnFailure confirms a failed load is recorded and
+// leaves the last tree loaded in place, and that a later success clears it.
+func TestRefreshKeepsLastTreeOnFailure(t *testing.T) {
+	var listErr error
+	tree := &types.Directory{Id: "0", Name: "/", Path: "", Directories: []*types.Directory{{Id: "1", Name: "lego", Path: "/"}}}
+	s := NewRemoteConfigFS(fakeListClient{list: func() (*types.ListResponse, error) {
+		if listErr != nil {
+			return nil, listErr
+		}
+		return &types.ListResponse{Top: tree}, nil
+	}}, "/unused", nil)
+
+	listErr = errors.New("unavailable")
+	if err := s.LoadSnapshot(context.Background()); err != nil {
+		t.Fatalf("LoadSnapshot: %v", err)
+	}
+	if !s.refreshFailing {
+		t.Error("failed initial load not recorded")
+	}
+	if s.snapshot.Directory("/lego") != nil {
+		t.Error("tree present after a failed initial load")
+	}
+
+	listErr = nil
+	s.refresh(context.Background())
+	if s.refreshFailing {
+		t.Error("successful load still recorded as failing")
+	}
+	if s.snapshot.Directory("/lego") == nil {
+		t.Fatal("tree missing after a successful load")
+	}
+
+	listErr = errors.New("unavailable")
+	s.refresh(context.Background())
+	if !s.refreshFailing {
+		t.Error("failed load not recorded")
+	}
+	if s.snapshot.Directory("/lego") == nil {
+		t.Error("a failed load dropped the last tree")
+	}
 }
